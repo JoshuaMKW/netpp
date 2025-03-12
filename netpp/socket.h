@@ -14,6 +14,7 @@
 #endif
 
 #include "network.h"
+#include "protocol.h"
 #include "request.h"
 #include "response.h"
 
@@ -54,6 +55,14 @@ namespace netpp {
     E_REASON_THREADS,
     E_REASON_SEND,
     E_REASON_ADDRESS,
+    E_REASON_ACCEPT,
+    E_REASON_CONNECT,
+    E_REASON_RECV,
+    E_REASON_SENDTO,
+    E_REASON_RECVFROM,
+    E_REASON_CORRUPT,
+    E_REASON_ADAPTER_UNKNOWN,
+    E_REASON_ADAPTER_FAIL,
     E_COUNT,
   };
 
@@ -63,11 +72,30 @@ namespace netpp {
     E_BOTH,
   };
 
-  struct ISocketPipe {
+  class DNS_Request;
+  class DNS_Response;
+  class HTTP_Request;
+  class HTTP_Response;
+  class RawPacket;
+  class RTP_Packet;
+  class RTCP_Packet;
+  class SIP_Request;
+  class SIP_Response;
+
+  class IServer;
+
+  class ISocketPipe {
+  public:
     using close_callback = std::function<void(ISocketPipe*)>;
-    using request_callback = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
-    using response_callback = std::function<HTTP_Request* (const ISocketPipe* source, const HTTP_Response* response)>;
-    using receive_callback = std::function<RawPacket* (const ISocketPipe* source, const RawPacket* packet)>;
+    using dns_request_callback = std::function<DNS_Response* (const ISocketPipe* source, const DNS_Request* request)>;
+    using dns_response_callback = std::function<DNS_Request* (const ISocketPipe* source, const DNS_Response* response)>;
+    using http_request_callback = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
+    using http_response_callback = std::function<HTTP_Request* (const ISocketPipe* source, const HTTP_Response* response)>;
+    using raw_receive_callback = std::function<RawPacket* (const ISocketPipe* source, const RawPacket* packet)>;
+    using rtp_packet_callback = std::function<void(const ISocketPipe* source, const RTP_Packet* packet)>;
+    using rtcp_packet_callback = std::function<void(const ISocketPipe* source, const RTCP_Packet* packet)>;
+    using sip_request_callback = std::function<SIP_Response* (const ISocketPipe* source, const SIP_Request* request)>;
+    using sip_response_callback = std::function<SIP_Request* (const ISocketPipe* source, const SIP_Response* response)>;
 
     virtual ~ISocketPipe() = default;
 
@@ -82,16 +110,237 @@ namespace netpp {
     virtual void close() = 0;
     virtual void error(ESocketErrorReason reason) = 0;
 
+    // Not recommended, only use if absolutely necessary.
+    // Favor async programming instead.
+    virtual bool sync(uint64_t wait_time = 0) = 0;
+
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
+
+    // Application surrenders ownership of the buffer
     virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
     virtual bool send(const HTTP_Request* request) = 0;
     virtual bool send(const HTTP_Response* response) = 0;
+
+    // Application surrenders ownership of the buffer
     virtual bool send(const RawPacket* packet) = 0;
 
-    virtual void on_close(close_callback callback) = 0;
-    virtual void on_receive(receive_callback callback) = 0;
-    virtual void on_request(request_callback callback) = 0;
-    virtual void on_response(response_callback callback) = 0;
+    virtual bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
+
+    virtual void on_close(close_callback cb) = 0;
+    virtual void on_dns_request(dns_request_callback cb) = 0;
+    virtual void on_dns_response(dns_response_callback cb) = 0;
+    virtual void on_http_request(http_request_callback cb) = 0;
+    virtual void on_http_response(http_response_callback cb) = 0;
+    virtual void on_raw_receive(raw_receive_callback cb) = 0;
+    virtual void on_rtp_packet(rtp_packet_callback) = 0;
+    virtual void on_rtcp_packet(rtcp_packet_callback) = 0;
+    virtual void on_sip_request(sip_request_callback) = 0;
+    virtual void on_sip_response(sip_response_callback) = 0;
+
+    virtual void signal_close() = 0;
+    virtual const DNS_Response* signal_dns_request(const DNS_Request* request) = 0;
+    virtual const DNS_Request* signal_dns_response(const DNS_Response* response) = 0;
+    virtual const HTTP_Response* signal_http_request(const HTTP_Request* request) = 0;
+    virtual const HTTP_Request* signal_http_response(const HTTP_Response* response) = 0;
+    virtual const RawPacket* signal_raw_receive(const RawPacket* packet) = 0;
+    virtual void signal_rtp_packet(const RTP_Packet* packet) = 0;
+    virtual void signal_rtcp_packet(const RTCP_Packet* packet) = 0;
+    virtual const SIP_Response* signal_sip_request(const SIP_Request* request) = 0;
+    virtual const SIP_Request* signal_sip_response(const SIP_Response* response) = 0;
+  };
+
+  class ISocketOSSupportLayer {
+  public:
+    using close_cb = std::function<bool(ISocketOSSupportLayer*)>;
+    using error_cb = std::function<bool(ISocketOSSupportLayer*, ESocketErrorReason reason)>;
+
+    virtual ~ISocketOSSupportLayer() = 0;
+
+    virtual uint64_t socket() const = 0;
+
+    virtual bool is_busy(EPipeOperation op) const = 0;
+    virtual void set_busy(EPipeOperation op, bool busy) = 0;
+
+    virtual bool open(const char* hostname, const char* port) = 0;
+    virtual void close() = 0;
+    virtual void error(ESocketErrorReason reason) = 0;
+
+    virtual bool sync(uint64_t wait_time = 0) = 0;
+
+    virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
+
+    // Application surrenders ownership of the buffer
+    virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
+
+    // --------------------
+
+    virtual char* recv_buf() const = 0;
+    virtual uint32_t recv_buf_size() const = 0;
+    virtual char* send_buf() const = 0;
+    virtual uint32_t send_buf_size() const = 0;
+
+    virtual void set_recv_buf(char* buf) = 0;
+    virtual void set_recv_buf_size(uint32_t size) = 0;
+    virtual void set_send_buf(const char* buf) = 0;
+    virtual void set_send_buf_size(uint32_t size) = 0;
+
+    // --------------------
+
+    virtual void on_close(close_cb cb) = 0;
+    virtual void on_error(error_cb cb) = 0;
+  };
+
+  /// <summary>
+  /// Implements TCP socket functionality
+  /// </summary>
+  class TCP_Socket : public ISocketPipe {
+  public:
+    TCP_Socket() {
+    }
+
+    ~TCP_Socket() override {}
+
+    uint64_t socket() const override { return m_socket_layer->socket(); }
+
+    const std::string& hostname() const override { return m_host_name; }
+    const std::string& port() const override { return m_port; }
+
+    bool is_busy(EPipeOperation op) const override { return m_socket_layer->is_busy(op);
+    }
+
+    bool open(const char* hostname, const char* port) override;
+    void close() override;
+    void error(ESocketErrorReason reason) override { m_socket_layer->error(reason); }
+
+    bool sync(uint64_t wait_time = 0) override { return m_socket_layer->sync(); }
+
+    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
+
+    // Application surrenders ownership of the buffer
+    bool send(const char* data, uint32_t size, uint32_t* flags) override { m_socket_layer->send(data, size, flags); }
+    bool send(const HTTP_Request* request) override;
+    bool send(const HTTP_Response* response) override;
+
+    // Application surrenders ownership of the buffer
+    bool send(const RawPacket* packet) override;
+
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {}
+
+    void on_close(close_callback cb) override { m_signal_close = cb; }
+    void on_dns_request(dns_request_callback cb) override { m_signal_dns_request = cb; }
+    void on_dns_response(dns_response_callback cb) override { m_signal_dns_response = cb; }
+    void on_http_request(http_request_callback cb) override { m_signal_http_request = cb; }
+    void on_http_response(http_response_callback cb) override { m_signal_http_response = cb; }
+    void on_raw_receive(raw_receive_callback cb) override { m_signal_raw_receive = cb; }
+    void on_rtp_packet(rtp_packet_callback cb) override { m_signal_rtp_packet = cb; }
+    void on_rtcp_packet(rtcp_packet_callback cb) override { m_signal_rtcp_packet = cb; }
+    void on_sip_request(sip_request_callback cb) override { m_signal_sip_request = cb; }
+    void on_sip_response(sip_response_callback cb) override { m_signal_sip_response = cb; }
+
+    void signal_close() override { m_signal_close(this); }
+    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_signal_dns_request(this, request); }
+    const DNS_Request* signal_dns_response(const DNS_Response* response) override { return m_signal_dns_response(this, response); }
+    const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_signal_http_request(this, request); }
+    const HTTP_Request* signal_http_response(const HTTP_Response* response) override { return m_signal_http_response(this, response); }
+    const RawPacket* signal_raw_receive(const RawPacket* packet) override { return m_signal_raw_receive(this, packet); }
+    void signal_rtp_packet(const RTP_Packet* packet) override { m_signal_rtp_packet(this, packet); }
+    void signal_rtcp_packet(const RTCP_Packet* packet) override { m_signal_rtcp_packet(this, packet); }
+    const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_signal_sip_request(this, request); }
+    const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_signal_sip_response(this, response); }
+
+  private:
+    std::string m_host_name;
+    std::string m_port;
+
+    close_callback m_signal_close;
+    dns_request_callback m_signal_dns_request;
+    dns_response_callback m_signal_dns_response;
+    http_request_callback m_signal_http_request;
+    http_response_callback m_signal_http_response;
+    raw_receive_callback m_signal_raw_receive;
+    rtp_packet_callback m_signal_rtp_packet;
+    rtcp_packet_callback m_signal_rtcp_packet;
+    sip_request_callback m_signal_sip_request;
+    sip_response_callback m_signal_sip_response;
+
+    SOCKET m_socket;
+    std::mutex m_mutex;
+
+    uint32_t m_recv_buf_block;
+    uint32_t m_send_buf_block;
+
+    IServer* m_server;
+    ISocketOSSupportLayer* m_socket_layer;
+  };
+
+  /// <summary>
+  /// Uses AES-256 standard AES-GCM encryption for the TLS layer.
+  /// It also acts as a proxy layer for an internal socket provided by the constructor argument.
+  /// </summary>
+  class TLS_SocketProxy : public ISocketPipe {
+  public:
+    inline static const size_t key_size = 32;  // AES-256
+    inline static const size_t iv_size = 12;   // IV size for AES-GCM
+    inline static const size_t tag_size = 16;  // Auth tag size
+
+    TLS_SocketProxy(ISocketPipe* pipe, uint8_t* aes_key = nullptr) : m_pipe(pipe) {
+      if (aes_key) {
+        memmove(m_aes_key, aes_key, key_size);
+      }
+    }
+
+    ~TLS_SocketProxy() override { delete m_pipe; }
+
+    uint64_t socket() const override { return m_pipe->socket(); }
+
+    const std::string& hostname() const override { return m_pipe->hostname(); }
+    const std::string& port() const override { return m_pipe->port(); }
+
+    bool is_busy(EPipeOperation op) const override { return m_pipe->is_busy(op); }
+
+    bool open(const char* hostname, const char* port) override;
+    void close() override;
+    void error(ESocketErrorReason reason) override { m_pipe->error(reason); }
+
+    bool sync(uint64_t wait_time = 0) override { return m_pipe->sync(); }
+
+    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
+
+    // Application surrenders ownership of the buffer
+    bool send(const char* data, uint32_t size, uint32_t* flags) override;
+    bool send(const HTTP_Request* request) override;
+    bool send(const HTTP_Response* response) override;
+
+    // Application surrenders ownership of the buffer
+    bool send(const RawPacket* packet) override;
+
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
+
+    void on_close(close_callback cb) override { m_pipe->on_close(cb); }
+    void on_dns_request(dns_request_callback cb) override { m_pipe->on_dns_request(cb); }
+    void on_dns_response(dns_response_callback cb) override { m_pipe->on_dns_response(cb); }
+    void on_http_request(http_request_callback cb) override { m_pipe->on_http_request(cb); }
+    void on_http_response(http_response_callback cb) override { m_pipe->on_http_response(cb); }
+    void on_raw_receive(raw_receive_callback cb) override { m_pipe->on_raw_receive(cb); }
+    void on_rtp_packet(rtp_packet_callback cb) override { m_pipe->on_rtp_packet(cb); }
+    void on_rtcp_packet(rtcp_packet_callback cb) override { m_pipe->on_rtcp_packet(cb); }
+    void on_sip_request(sip_request_callback cb) override { m_pipe->on_sip_request(cb); }
+    void on_sip_response(sip_response_callback cb) override { m_pipe->on_sip_response(cb); }
+
+    void signal_close() override { m_pipe->signal_close(); }
+    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_pipe->signal_dns_request(request); }
+    const DNS_Request* signal_dns_response(const DNS_Response* response) override { return m_pipe->signal_dns_response(response); }
+    const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_pipe->signal_http_request(request); }
+    const HTTP_Request* signal_http_response(const HTTP_Response* response) override { return m_pipe->signal_http_response(response); }
+    const RawPacket* signal_raw_receive(const RawPacket* packet) override { return m_pipe->signal_raw_receive(packet); }
+    void signal_rtp_packet(const RTP_Packet* packet) override { m_pipe->signal_rtp_packet(packet); }
+    void signal_rtcp_packet(const RTCP_Packet* packet) override { m_pipe->signal_rtcp_packet(packet); }
+    const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_pipe->signal_sip_request(request); }
+    const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_pipe->signal_sip_response(response); }
+
+  private:
+    ISocketPipe* m_pipe;
+    uint8_t m_aes_key[key_size] = {};
   };
 
   bool sockets_initialize();

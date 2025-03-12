@@ -105,7 +105,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)netpp</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)netpp;C:\Program Files\OpenSSL-Win64\include</AdditionalIncludeDirectories>
       <ObjectFileName>$(IntDir)%(RelativeDir)%(Filename).obj</ObjectFileName>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
@@ -113,6 +113,10 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>C:\Program Files\OpenSSL-Win64\</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssl.lib;libcrypto.lib</AdditionalDependencies>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -122,7 +126,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)netpp</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)netpp;C:\Program Files\OpenSSL-Win64\include</AdditionalIncludeDirectories>
       <ObjectFileName>$(IntDir)%(RelativeDir)%(Filename).obj</ObjectFileName>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
@@ -132,6 +136,10 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>C:\Program Files\OpenSSL-Win64\</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssl.lib;libcrypto.lib</AdditionalDependencies>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="allocator.h" />
@@ -148,11 +156,13 @@
     <ClCompile Include="client.cpp" />
     <ClCompile Include="client_adapter.cpp" />
     <ClCompile Include="network.cpp" />
+    <ClCompile Include="protocol.cpp" />
     <ClCompile Include="request.cpp" />
     <ClCompile Include="response.cpp" />
     <ClCompile Include="server.cpp" />
     <ClCompile Include="server_adapter.cpp" />
     <ClCompile Include="socket.cpp" />
+    <ClCompile Include="socket_win32.cpp" />
     <ClCompile Include="TDP\client_unix.cpp" />
     <ClCompile Include="TDP\client_win32.cpp" />
     <ClCompile Include="TDP\server_unix.cpp" />

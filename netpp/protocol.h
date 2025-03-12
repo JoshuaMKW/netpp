@@ -27,11 +27,14 @@ namespace netpp {
     E_DNS,
     E_HTTP,
     E_HTTPS,
+    E_RAW,
     E_RTP,
     E_RTCP,
     E_SIP,
     E_COUNT,
   };
+
+#pragma region Transport Layer
 
   class ITransportLayerAdapter {
   public:
@@ -77,7 +80,7 @@ namespace netpp {
     bool recv(uint64_t sockfd, sockaddr* inaddr, char* buffer, uint32_t size, uint32_t* flags, uint32_t* transferred_out) override;
     bool send(uint64_t sockfd, sockaddr* inaddr, const char* buffer, uint32_t size, uint32_t* flags) override;
   };
-  
+
   class UDPTransportAdapter final : public ITransportLayerAdapter {
   public:
     UDPTransportAdapter(bool server_mode, void* user_data);
@@ -106,11 +109,81 @@ namespace netpp {
     void* m_io_data;
   };
 
+#pragma endregion
+
+#pragma region Application Layer
+
+  class ISocketPipe;
+
   class IApplicationLayerAdapter {
   public:
     virtual ~IApplicationLayerAdapter() = default;
 
-    virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
+    virtual bool on_receive(ISocketPipe *pipe, const char* data, uint32_t size, uint32_t flags) = 0;
   };
+
+  class DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    DNS_ApplicationAdapter() = default;
+    ~DNS_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class HTTP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    HTTP_ApplicationAdapter() = default;
+    ~HTTP_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class HTTPS_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    HTTPS_ApplicationAdapter() = default;
+    ~HTTPS_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class RAW_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    RAW_ApplicationAdapter() = default;
+    ~RAW_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class RTP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    RTP_ApplicationAdapter() = default;
+    ~RTP_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class RTCP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    RTCP_ApplicationAdapter() = default;
+    ~RTCP_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class SIP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  public:
+    SIP_ApplicationAdapter() = default;
+    ~SIP_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+  };
+
+  class ApplicationAdapterFactory {
+  public:
+    static IApplicationLayerAdapter* create(EApplicationLayerProtocol protocol);
+    static IApplicationLayerAdapter* detect(const char* data, uint32_t size);
+  };
+
+#pragma endregion
 
 }  // namespace netpp

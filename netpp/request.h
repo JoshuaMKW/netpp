@@ -22,9 +22,13 @@ namespace netpp {
 
   class HTTP_Request {
   public:
+    static bool is_http_request(const char* http_buf, uint32_t buflen);
     static HTTP_Request* create(EHTTP_RequestMethod type);
-    static HTTP_Request* create(const char* http_buf, int buflen);
+    static HTTP_Request* create(const char* http_buf, uint32_t buflen);
+
     static std::string build(const HTTP_Request& request);
+    // Returns a heap allocated buffer that must be freed by the caller
+    static const char *build_buf(const HTTP_Request& request, uint32_t* size_out);
 
     EHTTP_RequestMethod method() const { return m_method; }
     std::string path() const { return m_path; }

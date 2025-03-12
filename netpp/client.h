@@ -218,9 +218,26 @@ namespace netpp {
       bool send(const RawPacket* packet) override;
 
       void on_close(ISocketPipe::close_callback callback) override { m_on_close = callback; }
-      void on_receive(ISocketPipe::receive_callback callback) override { m_on_receive = callback; }
-      void on_request(ISocketPipe::request_callback callback) override { m_on_request = callback; }
-      void on_response(ISocketPipe::response_callback callback) override { m_on_response = callback; }
+      void on_dns_request(ISocketPipe::dns_request_callback callback) override { m_on_dns_request = callback; }
+      void on_dns_response(ISocketPipe::dns_response_callback callback) override { m_on_dns_response = callback; }
+      void on_http_request(ISocketPipe::http_request_callback callback) override { m_on_http_request = callback; }
+      void on_http_response(ISocketPipe::http_response_callback callback) override { m_on_http_response = callback; }
+      void on_raw_receive(ISocketPipe::raw_receive_callback callback) override { m_on_raw_receive = callback; }
+      void on_rtp_packet(ISocketPipe::rtp_packet_callback callback) override { m_on_rtp_packet = callback; }
+      void on_rtcp_packet(ISocketPipe::rtcp_packet_callback callback) override { m_on_rtcp_packet = callback; }
+      void on_sip_request(ISocketPipe::sip_request_callback callback) override { m_on_sip_request = callback; }
+      void on_sip_response(ISocketPipe::sip_response_callback callback) override { m_on_sip_response = callback; }
+
+      void signal_close() override;
+      const DNS_Response* signal_dns_request(const DNS_Request* request) override;
+      const DNS_Request* signal_dns_response(const DNS_Response* response) override;
+      const HTTP_Response* signal_http_request(const HTTP_Request* request) override;
+      const HTTP_Request* signal_http_response(const HTTP_Response* response) override;
+      const RawPacket* signal_raw_receive(const RawPacket* packet) override;
+      void signal_rtp_packet(const RTP_Packet* packet) override;
+      void signal_rtcp_packet(const RTCP_Packet* packet) override;
+      const SIP_Response* signal_sip_request(const SIP_Request* request) override;
+      const SIP_Request* signal_sip_response(const SIP_Response* response) override;
 
     protected:
       char* recv_buf();
@@ -232,9 +249,15 @@ namespace netpp {
       std::string m_port;
 
       ISocketPipe::close_callback m_on_close;
-      ISocketPipe::receive_callback m_on_receive;
-      ISocketPipe::request_callback m_on_request;
-      ISocketPipe::response_callback m_on_response;
+      ISocketPipe::dns_request_callback m_on_dns_request;
+      ISocketPipe::dns_response_callback m_on_dns_response;
+      ISocketPipe::http_request_callback m_on_http_request;
+      ISocketPipe::http_response_callback m_on_http_response;
+      ISocketPipe::raw_receive_callback m_on_raw_receive;
+      ISocketPipe::rtp_packet_callback m_on_rtp_packet;
+      ISocketPipe::rtcp_packet_callback m_on_rtcp_packet;
+      ISocketPipe::sip_request_callback m_on_sip_request;
+      ISocketPipe::sip_response_callback m_on_sip_response;
 
       Tag_WSA_BUF* m_recv_buffer;
       Tag_WSA_BUF* m_send_buffer;

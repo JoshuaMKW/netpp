@@ -70,18 +70,7 @@ namespace netpp {
     return end;
   }
 
-  HTTP_Request* HTTP_Request::create(EHTTP_RequestMethod type) {
-    HTTP_Request* request = new HTTP_Request();
-    request->m_method = type;
-    request->m_path = "";
-    request->m_version = "";
-    request->m_headers = new std::string[32]();
-    request->m_headers_count = 0;
-    request->m_body = "";
-    return request;
-  }
-
-  HTTP_Request* HTTP_Request::create(const char* http_buf, int buflen) {
+  bool HTTP_Request::is_http_request(const char* http_buf, uint32_t buflen) {
     // Check for the HTTP tag
     bool is_http = false;
 
@@ -94,21 +83,38 @@ namespace netpp {
       }
     }
 
-    for (int i = 0; i < buflen - 3; i++) {
+    for (uint32_t i = 0; i < buflen - 3; i++) {
       if (http_buf[i] == 'H' && http_buf[i + 1] == 'T' && http_buf[i + 2] == 'T' && http_buf[i + 3] == 'P') {
         is_http = true;
         break;
       }
 
       // HTTP tag is always followed by a newline
-      if (http_buf[i] == '\n' || http_buf[i + 1] == '\n' || http_buf[i + 2] == '\n' || http_buf[i + 3] == '\n') {
+      if (http_buf[i] == '\n') {
         break;
       }
     }
 
-    if (!is_http) {
+    return is_http;
+  }
+
+  HTTP_Request* HTTP_Request::create(EHTTP_RequestMethod type) {
+    HTTP_Request* request = new HTTP_Request();
+    request->m_method = type;
+    request->m_path = "";
+    request->m_version = "";
+    request->m_headers = new std::string[32]();
+    request->m_headers_count = 0;
+    request->m_body = "";
+    return request;
+  }
+
+  HTTP_Request* HTTP_Request::create(const char* http_buf, uint32_t buflen) {
+    if (!is_http_request(http_buf, buflen)) {
       return nullptr;
     }
+
+    const char* end = http_buf + buflen;
 
     EHTTP_RequestMethod method = EHTTP_RequestMethod::E_NONE;
     if (http_buf[0] == 'G' && http_buf[1] == 'E' && http_buf[2] == 'T') {
@@ -165,7 +171,8 @@ namespace netpp {
         query = end_query + 1;
       }
       request->set_path(std::string(path, end_path));
-    } else {
+    }
+    else {
       request->set_path(std::string(path, end_path_query));
     }
 
@@ -272,6 +279,96 @@ namespace netpp {
     }
 
     return request_str;
+  }
+
+  const char* HTTP_Request::build_buf(const HTTP_Request& request, uint32_t *size_out) {
+    size_t offset = 0;
+
+    //--------------------------------------------------------------
+    // Calculate the size of the buffer
+    size_t http_size = 9;  // 2 spaces, 1 carriage return, 1 newline, HTTP/
+    const char* request_str = http_request_str(request.method());
+
+    http_size += strlen(request_str);
+    http_size += request.path().length();
+    http_size += request.version().length();
+
+    const std::string* headers = request.headers();
+    for (int i = 0; i < request.headers_count(); i++) {
+      http_size += headers[i].length() + 2;  // 1 carriage return, 1 newline
+    }
+
+    if (request.has_body()) {
+      std::string body = request.body();
+
+      size_t body_len = body.length();
+
+      // Calclulate the number of digits in the body length
+      while (body_len > 0) {
+        body_len /= 10;
+        http_size++;
+      }
+
+      http_size += 18;  // Content-Length: \r\n
+      http_size += body.length() + 2;
+    }
+    //--------------------------------------------------------------
+
+    char* buf_out = new char[http_size]();
+    
+    //--------------------------------------------------------------
+    // Method
+    size_t request_len = strlen(request_str);
+    memcpy(buf_out + offset, request_str, request_len);
+    offset += request_len;
+
+    buf_out[offset++] = ' ';
+
+    size_t path_len = request.path().length();
+    memcpy(buf_out + offset, request.path().c_str(), path_len);
+    offset += path_len;
+
+    buf_out[offset++] = ' ';
+
+    size_t version_len = request.version().length();
+    memcpy(buf_out + offset, request.version().c_str(), version_len);
+    offset += version_len;
+
+    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    offset += 2;
+    //--------------------------------------------------------------
+
+    //--------------------------------------------------------------
+    // Headers
+    for (int i = 0; i < request.headers_count(); i++) {
+      size_t header_len = headers[i].length();
+      memcpy(buf_out + offset, headers[i].c_str(), header_len);
+      offset += header_len;
+      *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+      offset += 2;
+    }
+    //--------------------------------------------------------------
+
+    //--------------------------------------------------------------
+    // End of headers
+    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    offset += 2;
+    //--------------------------------------------------------------
+
+    //--------------------------------------------------------------
+    // Body
+    if (request.has_body()) {
+      std::string body = request.body();
+      size_t body_len = body.length();
+      memcpy(buf_out + offset, body.c_str(), body_len);
+      offset += body_len;
+      *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+      offset += 2;
+    }
+    //--------------------------------------------------------------
+
+    *size_out = static_cast<uint32_t>(http_size);
+    return buf_out;
   }
 
   const char* http_request_str(EHTTP_RequestMethod method) {

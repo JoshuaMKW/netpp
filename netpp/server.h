@@ -28,7 +28,7 @@ public:
   using request_callback = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
   using response_callback = std::function<void(const ISocketPipe* source, const HTTP_Response* response)>;
 
-  virtual ~IServer() = default;
+  virtual ~IServer() = 0;
 
   virtual bool is_running() const = 0;
 
@@ -60,6 +60,7 @@ public:
   virtual bool send(uint64_t socket, const HTTP_Response*) = 0;
   virtual bool send(uint64_t socket, const RawPacket*) = 0;
 
+  virtual const ISocketOSSupportLayer* get_os_layer() const = 0;
 
 protected:
   virtual void emit_error(ISocketPipe* pipe, EServerError error, int reason) = 0;
@@ -67,7 +68,7 @@ protected:
 
 class TCP_Server final : public IServer {
 public:
-  TCP_Server(uint32_t bufsize = 4096, uint32_t bufcount = 128, int worker_threads = -1);
+  TCP_Server(uint32_t desired_bufsize = 0, uint32_t bufcount = 128, int worker_threads = -1);
   ~TCP_Server();
 
   bool is_running() const override;
@@ -113,68 +114,8 @@ protected:
     E_CLOSE,
   };
 
-  enum class ECompletionKey : DWORD {
-    E_STOP,
-    E_START,
-  };
-
-  struct Win32SocketPipe;
-
-  struct Tag_RIO_BUF : public RIO_BUF {
-    Tag_RIO_BUF(RIO_BUFFERID buffer_id, DWORD offset, DWORD length, ESocketOperation operation, Win32SocketPipe* owner) {
-      this->BufferId = buffer_id;
-      this->Offset = offset;
-      this->Length = length;
-      this->Operation = operation;
-      this->Pipe = owner;
-      this->IsBusy = FALSE;
-    }
-
-    ESocketOperation Operation;
-    Win32SocketPipe* Pipe;
-    BOOL IsBusy;
-  };
 
   struct Win32SocketPipe : ISocketPipe {
-    friend class TCP_Server;
-
-    Win32SocketPipe(TCP_Server* server) {
-      m_socket = INVALID_SOCKET;
-      m_host_name = "";
-      m_port = "";
-      m_recv_buf_block = StaticBlockAllocator::INVALID_BLOCK;
-      m_recv_buffer = new Tag_RIO_BUF{
-        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
-        0,
-        0,
-        ESocketOperation::E_RECV,
-        this
-      };
-      m_send_buf_block = StaticBlockAllocator::INVALID_BLOCK;
-      m_send_buffer = new Tag_RIO_BUF{
-        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
-        0,
-        0,
-        ESocketOperation::E_SEND,
-        this
-      };
-      m_completion_queue = RIO_INVALID_CQ;
-      m_request_queue = RIO_INVALID_RQ;
-      m_iocp = INVALID_HANDLE_VALUE;
-      m_overlapped = { 0 };
-      m_server = server;
-    }
-
-    ~Win32SocketPipe() {
-      delete m_recv_buffer;
-      delete m_send_buffer;
-
-      if (m_socket != INVALID_SOCKET) {
-        ::shutdown(m_socket, SD_BOTH);
-        ::closesocket(m_socket);
-        m_socket = INVALID_SOCKET;
-      }
-    }
 
     uint64_t socket() const override { return (uint64_t)m_socket; }
 
@@ -192,10 +133,16 @@ protected:
     bool send(const HTTP_Request* request) override;
     bool send(const RawPacket* packet) override;
 
-    void on_close(ISocketPipe::close_callback callback) override { m_on_close = callback; }
-    void on_receive(ISocketPipe::receive_callback callback) override { m_on_receive = callback; }
-    void on_request(ISocketPipe::request_callback callback) override { m_on_request = callback; }
-    void on_response(ISocketPipe::response_callback callback) override { m_on_response = callback; }
+    void on_close(close_callback cb) override { m_on_close = cb; }
+    void on_dns_request(dns_request_callback cb) override { m_on_dns_request = cb; }
+    void on_dns_response(dns_response_callback cb) override { m_on_dns_response = cb; }
+    void on_http_request(http_request_callback cb) override { m_on_http_request = cb; }
+    void on_http_response(http_response_callback cb) override { m_on_http_response = cb; }
+    void on_raw_receive(raw_receive_callback cb) override { m_on_raw_receive = cb; }
+    void on_rtp_packet(rtp_packet_callback cb) override { m_on_rtp_packet = cb; }
+    void on_rtcp_packet(rtcp_packet_callback cb) override { m_on_rtcp_packet = cb; }
+    void on_sip_request(sip_request_callback cb) override { m_on_sip_request = cb; }
+    void on_sip_response(sip_response_callback cb) override { m_on_sip_response = cb; }
 
     bool open(uint64_t socket);
 
@@ -208,10 +155,16 @@ protected:
     std::string m_host_name;
     std::string m_port;
 
-    ISocketPipe::close_callback m_on_close;
-    ISocketPipe::receive_callback m_on_receive;
-    ISocketPipe::request_callback m_on_request;
-    ISocketPipe::response_callback m_on_response;
+    close_callback m_on_close;
+    dns_request_callback m_on_dns_request;
+    dns_response_callback m_on_dns_response;
+    http_request_callback m_on_http_request;
+    http_response_callback m_on_http_response;
+    raw_receive_callback m_on_raw_receive;
+    rtp_packet_callback m_on_rtp_packet;
+    rtcp_packet_callback m_on_rtcp_packet;
+    sip_request_callback m_on_sip_request;
+    sip_response_callback m_on_sip_response;
 
     SOCKET m_socket;
     std::mutex m_mutex;
@@ -228,6 +181,11 @@ protected:
     OVERLAPPED m_overlapped;
 
     TCP_Server* m_server;
+
+    // For chunking data into the buffer
+    const char* m_send_data;
+    uint32_t m_send_size;
+    uint32_t m_send_offset;
   };
 
 #else

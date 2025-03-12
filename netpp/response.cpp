@@ -70,6 +70,34 @@ namespace netpp {
     return end;
   }
 
+  bool HTTP_Response::is_http_response(const char* http_buf, uint32_t buflen) {
+    // Check for the HTTP tag
+    bool is_http = false;
+
+    // Attempt to trim leading whitespace
+    const char* end = http_buf + buflen;
+    if (http_buf[0] == ' ' || http_buf[0] == '\t' || http_buf[0] == '\n') {
+      const char* ltrim = next_token(http_buf, end);
+      if (ltrim) {
+        http_buf = ltrim;
+      }
+    }
+
+    for (uint32_t i = 0; i < buflen - 3; i++) {
+      if (http_buf[i] == 'H' && http_buf[i + 1] == 'T' && http_buf[i + 2] == 'T' && http_buf[i + 3] == 'P') {
+        is_http = true;
+        break;
+      }
+
+      // HTTP tag is always followed by a newline
+      if (http_buf[i] == '\n') {
+        break;
+      }
+    }
+
+    return is_http;
+  }
+
   HTTP_Response* HTTP_Response::create(EHTTP_ResponseStatusCode status) {
     HTTP_Response* response = new HTTP_Response();
     response->m_status = status;
@@ -148,8 +176,8 @@ namespace netpp {
       response->add_header(header);
 
       bool is_body_sep_next =
-          (line_end[0] == '\n' && line_end[1] == '\n') ||
-          (line_end[0] == '\r' && line_end[1] == '\n' && line_end[2] == '\r' && line_end[3] == '\n');
+        (line_end[0] == '\n' && line_end[1] == '\n') ||
+        (line_end[0] == '\r' && line_end[1] == '\n' && line_end[2] == '\r' && line_end[3] == '\n');
 
       http_buf = next_line(http_buf, end);
 
@@ -169,6 +197,137 @@ namespace netpp {
     }
 
     return response;
+  }
+
+  std::string HTTP_Response::build(const HTTP_Response& response) {
+    std::string response_str =
+      "HTTP/" + response.version() + " " + std::to_string((int)response.status_code()) + " " + http_response_status(response.status_code()) + "\r\n";
+
+    // Headers
+    const std::string* headers = response.headers();
+    for (int i = 0; i < response.headers_count(); i++) {
+      response_str += headers[i] + "\r\n";
+    }
+
+    // Body
+    if (response.has_body()) {
+      std::string body = response.body();
+      response_str += "Content-Length: " + std::to_string(body.length()) + "\r\n";
+      response_str += "\r\n";
+      response_str += body;
+    }
+
+    return response_str;
+  }
+
+  const char* HTTP_Response::build_buf(const HTTP_Response& response, uint32_t* size_out) {
+    size_t offset = 0;
+
+    std::string code_str = std::to_string((int)response.status_code());
+    const char* status = http_response_status(response.status_code());
+
+    //-------------------------------------------------------------
+    // Calculate the size of the buffer
+    //-------------------------------------------------------------
+    size_t response_size = 0;
+    response_size += 12 + response.version().length() + strlen(status);  // "HTTP/... ZZZ sss...\r\n"
+
+    const std::string* headers = response.headers();
+    for (int i = 0; i < response.headers_count(); i++) {
+      response_size += headers[i].length() + 2;  // header + "\r\n"
+    }
+
+    if (response.has_body()) {
+      std::string body = response.body();
+
+      size_t body_len = body.length();
+
+      // Calculate the number of digits in the body length
+      while (body_len > 0) {
+        body_len /= 10;
+        response_size++;
+      }
+
+      response_size += 18;  // Content-Length: \r\n
+      response_size += body.length() + 2;
+    }
+
+    response_size += 2;  // "\r\n" (end of headers)
+    //-------------------------------------------------------------
+
+    char* response_buf = new char[response_size]();
+
+    //-------------------------------------------------------------
+    // Status line
+    //-------------------------------------------------------------
+    memcpy(response_buf + offset, "HTTP/", 5);
+    offset += 5;
+
+    memcpy(response_buf + offset, response.version().c_str(), response.version().length());
+    offset += response.version().length();
+
+    response_buf[offset++] = ' ';
+
+    memcpy(response_buf + offset, code_str.c_str(), code_str.length());
+    offset += code_str.length();
+
+    response_buf[offset++] = ' ';
+
+    size_t status_len = strlen(status);
+    memcpy(response_buf + offset, status, status_len);
+    offset += status_len;
+
+    *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
+    offset += 2;
+    //-------------------------------------------------------------
+
+    //-------------------------------------------------------------
+    // Headers
+    //-------------------------------------------------------------
+    for (int i = 0; i < response.headers_count(); i++) {
+      size_t header_len = headers[i].length();
+      memcpy(response_buf + offset, headers[i].c_str(), header_len);
+      offset += header_len;
+      *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
+      offset += 2;
+    }
+
+    std::string body = response.body();
+
+    if (response.has_body()) {
+      size_t body_len = body.length();
+      std::string body_len_str = std::to_string(body_len);
+
+      memcpy(response_buf + offset, "Content-Length: ", 16);
+      offset += 16;
+      memcpy(response_buf + offset, body_len_str.c_str(), body_len_str.length());
+      offset += body_len_str.length();
+      memcpy(response_buf + offset, "\r\n", 2);
+      offset += 2;
+    }
+
+    //-------------------------------------------------------------
+
+    //-------------------------------------------------------------
+    // End of headers
+    //-------------------------------------------------------------
+    *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
+    offset += 2;
+
+    //-------------------------------------------------------------
+    // Body
+    //-------------------------------------------------------------
+    if (response.has_body()) {
+      size_t body_len = body.length();
+      memcpy(response_buf + offset, body.c_str(), body_len);
+      offset += body_len;
+      *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
+      offset += 2;
+    }
+    //-------------------------------------------------------------
+
+    *size_out = static_cast<uint32_t>(response_size);
+    return response_buf;
   }
 
   const char* HTTP_Response::header_begin(const char* http_buf, int buflen) {
@@ -214,8 +373,8 @@ namespace netpp {
       return nullptr;
     }
 
-    const char *end = http_buf + buflen;
-    const char *b_begin = h_end + 4;
+    const char* end = http_buf + buflen;
+    const char* b_begin = h_end + 4;
 
     if (b_begin >= end) {
       return nullptr;
@@ -232,7 +391,7 @@ namespace netpp {
   }
 
   uint32_t HTTP_Response::content_length(const char* http_buf, int buflen) {
-    const char *content_len_header = strstr(http_buf, "Content-Length: ");
+    const char* content_len_header = strstr(http_buf, "Content-Length: ");
     if (!content_len_header) {
       return 0;
     }

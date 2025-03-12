@@ -562,6 +562,8 @@ namespace netpp {
       uint32_t recv_buf_offset = 0;
       uint32_t content_length = 0;
 
+      EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_NONE;
+
       do {
         uint32_t flags = 0;
         uint32_t transferred = 0;
@@ -588,25 +590,14 @@ namespace netpp {
           recv_buf_offset += transferred;
 
           if (content_length == 0) {
-            if (HTTP_Response::header_end(recv_buf, recv_buf_offset)) {
-              content_length = HTTP_Response::content_length(recv_buf, message_size);
-              if (content_length == 0) {
-                message_size = content_length;
-                is_message_complete = true;
-              }
+            if (const char* h_end = HTTP_Response::header_end(recv_buf, recv_buf_offset)) {
+              content_length = HTTP_Response::content_length(recv_buf, recv_buf_offset);
+              message_size =
+                ((uint32_t)(h_end - recv_buf) + 4) + content_length;
             }
           }
-          else if (content_length > 0) {
-            if (message_size == 0) {
-              if (const char* b_beg = HTTP_Response::body_begin(recv_buf, recv_buf_offset)) {
-                message_size = ((uint32_t)(b_beg - recv_buf)) + content_length;
-              }
-            }
 
-            if (message_size > 0) {
-              is_message_complete = recv_buf_offset >= message_size;
-            }
-          }
+          is_message_complete = message_size > 0 && recv_buf_offset >= message_size;
         }
       } while (!is_message_complete);
 
@@ -842,6 +833,73 @@ namespace netpp {
 
   bool TCP_Client::Win32SocketPipe::send(const RawPacket* packet) {
     return send(packet->m_message, packet->m_length, NULL) != 0;
+  }
+
+  void TCP_Client::Win32SocketPipe::signal_close() {
+    if (m_on_close) {
+      m_on_close(this);
+    }
+  }
+
+  const DNS_Response* TCP_Client::Win32SocketPipe::signal_dns_request(const DNS_Request* request) {
+    if (m_on_dns_request) {
+      return m_on_dns_request(this, request);
+    }
+    return nullptr;
+  }
+
+  const DNS_Request* TCP_Client::Win32SocketPipe::signal_dns_response(const DNS_Response* response) {
+    if (m_on_dns_response) {
+      return m_on_dns_response(this, response);
+    }
+    return nullptr;
+  }
+
+  const HTTP_Response* TCP_Client::Win32SocketPipe::signal_http_request(const HTTP_Request* request) {
+    if (m_on_http_request) {
+      return m_on_http_request(this, request);
+    }
+    return nullptr;
+  }
+
+  const HTTP_Request* TCP_Client::Win32SocketPipe::signal_http_response(const HTTP_Response* response) {
+    if (m_on_http_response) {
+      return m_on_http_response(this, response);
+    }
+    return nullptr;
+  }
+
+  const RawPacket* TCP_Client::Win32SocketPipe::signal_raw_receive(const RawPacket* packet) {
+    if (m_on_raw_receive) {
+      return m_on_raw_receive(this, packet);
+    }
+    return nullptr;
+  }
+
+  void TCP_Client::Win32SocketPipe::signal_rtp_packet(const RTP_Packet* packet) {
+    if (m_on_rtp_packet) {
+      m_on_rtp_packet(this, packet);
+    }
+  }
+
+  void TCP_Client::Win32SocketPipe::signal_rtcp_packet(const RTCP_Packet* packet) {
+    if (m_on_rtcp_packet) {
+      m_on_rtcp_packet(this, packet);
+    }
+  }
+
+  const SIP_Response* TCP_Client::Win32SocketPipe::signal_sip_request(const SIP_Request* request) {
+    if (m_on_sip_request) {
+      return m_on_sip_request(this, request);
+    }
+    return nullptr;
+  }
+
+  const SIP_Request* TCP_Client::Win32SocketPipe::signal_sip_response(const SIP_Response* response) {
+    if (m_on_sip_response) {
+      return m_on_sip_response(this, response);
+    }
+    return nullptr;
   }
 
 }  // namespace netpp

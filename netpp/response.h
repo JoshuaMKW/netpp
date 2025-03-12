@@ -75,8 +75,14 @@ namespace netpp {
 
   class HTTP_Response {
   public:
+    static bool is_http_response(const char* http_buf, uint32_t buflen);
     static HTTP_Response* create(EHTTP_ResponseStatusCode status);
     static HTTP_Response* create(const char* http_buf, int buflen);
+
+    static std::string build(const HTTP_Response& response);
+
+    // Returns a heap allocated buffer that must be freed by the caller
+    static const char* build_buf(const HTTP_Response& response, uint32_t* size_out);
 
     static const char* header_begin(const char* http_buf, int buflen);
     static const char* header_end(const char* http_buf, int buflen);

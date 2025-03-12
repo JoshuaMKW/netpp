@@ -10,47 +10,9 @@
 #define RIO_PENDING_MAX 5
 #define RIO_MAX_BUFFERS 1024
 
+#define SKIP_BUF_INIT_FLAG 0x80000000
+
 namespace netpp {
-
-  static std::string build_http_response(const HTTP_Response* response) {
-    std::string response_str =
-      "HTTP/" + response->version() + " " + std::to_string((int)response->status_code()) + " " + http_response_status(response->status_code()) + "\r\n";
-
-    // Headers
-    const std::string* headers = response->headers();
-    for (int i = 0; i < response->headers_count(); i++) {
-      response_str += headers[i] + "\r\n";
-    }
-
-    // Body
-    if (response->has_body()) {
-      std::string body = response->body();
-      response_str += "Content-Length: " + std::to_string(body.length()) + "\r\n";
-      response_str += "\r\n";
-      response_str += body;
-    }
-
-    return response_str;
-  }
-
-  static std::string build_http_request(const HTTP_Request* request) {
-    std::string request_str = http_request_str(request->method());
-    request_str += " " + request->path() + " " + request->version() + "\r\n";
-
-    const std::string* headers = request->headers();
-    for (int i = 0; i < request->headers_count(); i++) {
-      request_str += headers[i] + "\r\n";
-    }
-
-    if (request->has_body()) {
-      std::string body = request->body();
-      request_str += "Content-Length: " + std::to_string(body.length()) + "\r\n";
-      request_str += "\r\n";
-      request_str += body;
-    }
-
-    return request_str;
-  }
 
   template <typename TV, typename TM>
   inline TV RoundDown(TV Value, TM Multiple)
@@ -64,11 +26,9 @@ namespace netpp {
     return(RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0));
   }
 
-  TCP_Server::TCP_Server(uint32_t bufsize, uint32_t bufcount, int max_threads) {
+  TCP_Server::TCP_Server(uint32_t desired_bufsize, uint32_t bufcount, int max_threads) {
     m_error = EServerError::E_NONE;
     m_reason = -1;
-
-    uint32_t desired_size = bufsize * bufcount;
 
     uint32_t granularity = 0;
 
@@ -81,6 +41,11 @@ namespace netpp {
     granularity = sysconf(_SC_PAGESIZE);
 #endif
 
+    if (desired_bufsize == 0) {
+      desired_bufsize = granularity;
+    }
+
+    uint32_t desired_size = desired_bufsize * bufcount;
     desired_size = RoundUp(desired_size, granularity);
 
 #ifdef _WIN32
@@ -95,8 +60,8 @@ namespace netpp {
     m_sendbuflen = bufsize;
 #endif
 
-    m_recv_allocator.initialize(m_recvbuf, bufsize, bufcount);
-    m_send_allocator.initialize(m_sendbuf, bufsize, bufcount);
+    m_recv_allocator.initialize(m_recvbuf, desired_bufsize, bufcount);
+    m_send_allocator.initialize(m_sendbuf, desired_bufsize, bufcount);
 
     if (max_threads > 0) {
       m_max_threads = max_threads;
@@ -544,7 +509,7 @@ namespace netpp {
       if (!pipe.second->recv(0, NULL, NULL)) {
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING) {
-          pipe.second->error(ESocketErrorReason::E_REASON_LISTEN);
+          pipe.second->error(ESocketErrorReason::E_REASON_RECV);
         }
       }
     }
@@ -566,10 +531,8 @@ namespace netpp {
       std::unique_lock<std::mutex> lock(server->m_mutex);
 
       if (client_socket == INVALID_SOCKET) {
-        server->m_error = EServerError::E_ERROR_SOCKET;
-        server->m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-      }
-      else {
+        server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_ACCEPT);
+      } else {
         server->m_awaiting_sockets.push(client_socket);
       }
     }
@@ -586,7 +549,7 @@ namespace netpp {
 
       int rc = server->m_socket_io.rio.RIONotify(server_pipe->m_completion_queue);
       if (rc != ERROR_SUCCESS && rc != WSAEALREADY) {
-        server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_LISTEN);
+        server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_CORRUPT);
         return 0;
       }
 
@@ -614,7 +577,7 @@ namespace netpp {
         if (server_pipe->socket() == INVALID_SOCKET) {
           goto exit_thread;
         }
-        server_pipe->error(ESocketErrorReason::E_REASON_LISTEN);
+        server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
         goto exit_thread;
       }
 
@@ -626,7 +589,7 @@ namespace netpp {
         RIORESULT results[16];
         ULONG count = socket_io.rio.RIODequeueCompletion(server_pipe->m_completion_queue, results, 16);
         if (count == RIO_CORRUPT_CQ) {
-          server_pipe->error(ESocketErrorReason::E_REASON_LISTEN);
+          server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
           goto exit_thread;
         }
 
@@ -637,15 +600,21 @@ namespace netpp {
           Win32SocketPipe* pipe = (Win32SocketPipe*)buf->Pipe;
 
           if (result->Status != NO_ERROR) {
-            server_pipe->error(ESocketErrorReason::E_REASON_LISTEN);
+            if (buf->Operation == ESocketOperation::E_RECV) {
+              server_pipe->error(ESocketErrorReason::E_REASON_RECV);
+            } else {
+              server_pipe->error(ESocketErrorReason::E_REASON_SEND);
+            }
             continue;
           }
 
+          buf->IsBusy = false;
+
           switch (buf->Operation) {
           case ESocketOperation::E_RECV: {
+
             // Get the transfered data if received
             if (result->BytesTransferred == 0) {
-              buf->IsBusy = false;
               continue;
             }
 
@@ -653,50 +622,34 @@ namespace netpp {
 
             char* recv_buf = pipe->recv_buf();
 
-            // Determine if the message is an HTTP request
-            if (pipe->m_on_request) {
-              HTTP_Request* client_req = HTTP_Request::create(recv_buf, result->BytesTransferred);
-              if (client_req) {
-                HTTP_Response* response = pipe->m_on_request(pipe, client_req);
-                if (response) {
-                  pipe->send(response);
-                  delete response;
-                }
-                request_handled = true;
-                delete client_req;
-              }
+            IApplicationLayerAdapter* adapter = ApplicationAdapterFactory::detect(recv_buf, result->BytesTransferred);
+            if (!adapter) {
+              server_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+              continue;
             }
 
-            if (pipe->m_on_receive && !request_handled) {
-              RawPacket client_packet = { recv_buf, result->BytesTransferred };
-              RawPacket* response = pipe->m_on_receive(pipe, &client_packet);
-              if (response) {
-                pipe->send(response);
-                delete response;
-              }
-              request_handled = true;
-            }
-
-            // If the request was not handled, send a 501 Not Implemented response
-            if (!request_handled) {
-              HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_NOT_IMPLEMENTED);
-              if (!response) {
-                pipe->error(ESocketErrorReason::E_REASON_LISTEN);
-                buf->IsBusy = false;
-                continue;
-              }
-
-              response->add_header("Content-Type: text/html; charset=UTF-8");
-              response->add_header("Connection: close");
-              response->add_header("Content-Length: 79");
-              response->set_body("<!DOCTYPE html><html><body><h1>STATUS: 501\nNot Implemented.</h1></body></html>");
-
-              pipe->send(response);
+            if (!adapter->on_receive(pipe, recv_buf, result->BytesTransferred, 0)) {
+              server_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+              continue;
             }
             break;
           }
           case ESocketOperation::E_SEND: {
-            // Do nothing for now
+            // Check if the send is incomplete (chunking the data)
+            pipe->m_send_offset += result->BytesTransferred;
+            if (pipe->m_send_offset < pipe->m_send_size) {
+              // Send the remaining data
+              uint32_t flags = SKIP_BUF_INIT_FLAG;
+              pipe->send(pipe->m_send_data + pipe->m_send_offset, pipe->m_send_size - pipe->m_send_offset, &flags);
+            }
+            else {
+              // Send is complete
+              pipe->m_send_offset = 0;
+              pipe->m_send_size = 0;
+
+              delete[] pipe->m_send_data;
+              pipe->m_send_data = nullptr;
+            }
             break;
           }
           case ESocketOperation::E_CLOSE: {
@@ -704,7 +657,6 @@ namespace netpp {
             break;
           }
           }
-          buf->IsBusy = false;
         }  // End of completion for loop
       }  // End of lock
     }  // End of while loop
@@ -902,27 +854,33 @@ namespace netpp {
     char* send_buf = (char*)m_server->m_send_allocator.ptr(m_send_buf_block);
     uint32_t block_size = m_server->m_send_allocator.block_size();
 
-    size = min(size, block_size);
-    memcpy_s(send_buf, (size_t)block_size, data, size);
-    m_send_buffer->Length = (ULONG)size;
+    uint32_t chunk_size = min(size, block_size);
+    memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
+    m_send_buffer->Length = (ULONG)chunk_size;
 
     uint32_t flags_ = flags ? *flags : 0;
 
-    BOOL rc = socket_io.rio.RIOSend(m_request_queue, m_send_buffer, 1, flags_, m_send_buffer);
+    BOOL rc = socket_io.rio.RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~SKIP_BUF_INIT_FLAG, m_send_buffer);
     if (rc) {
+      if ((flags_ & SKIP_BUF_INIT_FLAG) == 0) {
+        m_send_data = data;
+        m_send_size = size;
+      }
       m_send_buffer->IsBusy = TRUE;
     }
     return rc;
   }
 
   bool TCP_Server::Win32SocketPipe::send(const HTTP_Response* response) {
-    std::string response_str = build_http_response(response);
-    return send(response_str.c_str(), (uint32_t)response_str.size(), NULL) != 0;
+    uint32_t request_buf_size = 0;
+    const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
+    return send(request_buf, request_buf_size, NULL) != 0;
   }
 
   bool TCP_Server::Win32SocketPipe::send(const HTTP_Request* request) {
-    std::string request_str = build_http_request(request);
-    return send(request_str.c_str(), (uint32_t)request_str.size(), NULL) != 0;
+    uint32_t request_buf_size = 0;
+    const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
+    return send(request_buf, request_buf_size, NULL) != 0;
   }
 
   bool TCP_Server::Win32SocketPipe::send(const RawPacket* packet) {

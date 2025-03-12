@@ -98,5 +98,11 @@
     <ClCompile Include="server_adapter.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
+    <ClCompile Include="protocol.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="socket_win32.cpp">
+      <Filter>Source Files\TCP</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

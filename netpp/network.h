@@ -4,7 +4,23 @@
 
 namespace netpp {
 
-  struct RawPacket {
+  class RawPacket {
+  public:
+    RawPacket(uint32_t length) : m_length(length) {}
+    RawPacket(const char* message, uint32_t length) : m_message(message), m_length(length) {}
+
+  protected:
+    RawPacket() = default;
+
+  public:
+    RawPacket(const RawPacket&) = delete;
+    RawPacket& operator=(const RawPacket&) = delete;
+
+    RawPacket(RawPacket&&) = default;
+    RawPacket& operator=(RawPacket&&) = default;
+
+    const char* message() const { return m_message; }
+    uint32_t length() const { return m_length; }
     const char* m_message;
     uint32_t m_length;
   };
