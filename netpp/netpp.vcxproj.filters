@@ -19,6 +19,9 @@
     <Filter Include="Source Files\UDP">
       <UniqueIdentifier>{d75ddbf6-1435-4fcf-b9ab-4629b419a968}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\TLS">
+      <UniqueIdentifier>{dcc01f43-7cf1-42a1-860c-f7ac53323238}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="server.h">
@@ -101,8 +104,14 @@
     <ClCompile Include="protocol.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="socket_win32.cpp">
+    <ClCompile Include="tdp\socket_win32.cpp">
       <Filter>Source Files\TCP</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\socket_layer.cpp">
+      <Filter>Source Files\TLS</Filter>
+    </ClCompile>
+    <ClCompile Include="udp\socket_win32.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

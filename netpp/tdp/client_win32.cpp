@@ -665,7 +665,7 @@ namespace netpp {
       return m_recv_buffer->IsBusy;
     case EPipeOperation::E_SEND:
       return m_send_buffer->IsBusy;
-    case EPipeOperation::E_BOTH:
+    case EPipeOperation::E_RECV_SEND:
       return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
     }
     return false;

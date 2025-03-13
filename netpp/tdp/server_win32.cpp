@@ -15,15 +15,13 @@
 namespace netpp {
 
   template <typename TV, typename TM>
-  inline TV RoundDown(TV Value, TM Multiple)
-  {
-    return((Value / Multiple) * Multiple);
+  inline TV RoundDown(TV Value, TM Multiple) {
+    return (Value / Multiple) * Multiple;
   }
 
   template <typename TV, typename TM>
-  inline TV RoundUp(TV Value, TM Multiple)
-  {
-    return(RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0));
+  inline TV RoundUp(TV Value, TM Multiple) {
+    return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
   TCP_Server::TCP_Server(uint32_t desired_bufsize, uint32_t bufcount, int max_threads) {
@@ -79,14 +77,8 @@ namespace netpp {
     }
 
     m_startup_thread = std::this_thread::get_id();
-
-    m_receive_callback = nullptr;
-    m_request_callback = nullptr;
-    m_response_callback = nullptr;
-
-    m_socket_io = { 0 };
-    m_server_pipe = nullptr;
-
+    m_server_socket.m_pipe = nullptr;
+    m_server_socket.m_state = { 0, 0 };
     m_stop_flag = false;
   }
 
@@ -120,7 +112,7 @@ namespace netpp {
   }
 
   bool TCP_Server::is_running() const {
-    return m_server_pipe && m_server_pipe->socket() != INVALID_SOCKET && !m_stop_flag;
+    return m_server_socket.m_pipe && m_server_socket.m_pipe->socket() != INVALID_SOCKET && !m_stop_flag;
   }
 
   bool TCP_Server::start(const char* hostname, const char* port) {
@@ -144,7 +136,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Request* request) {
     bool result = true;
-    std::for_each(std::execution::par_unseq, m_client_pipes.begin(), m_client_pipes.end(), [&result, request](auto& kv) {
+    std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, request](auto& kv) {
       if (!kv.second->send(request)) {
         result = false;
       }
@@ -154,7 +146,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Response* response) {
     bool result = true;
-    std::for_each(std::execution::par_unseq, m_client_pipes.begin(), m_client_pipes.end(), [&result, response](auto& kv) {
+    std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, response](auto& kv) {
       if (!kv.second->send(response)) {
         result = false;
       }
@@ -164,7 +156,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const RawPacket* packet) {
     bool result = true;
-    std::for_each(std::execution::par_unseq, m_client_pipes.begin(), m_client_pipes.end(), [&result, packet](auto& kv) {
+    std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, packet](auto& kv) {
       if (!kv.second->send(packet)) {
         result = false;
       }
@@ -222,7 +214,7 @@ namespace netpp {
     const char* error_str = server_error(error, reason);
 
     if (pipe) {
-      if (pipe == m_server_pipe) {
+      if (pipe == m_server_socket.m_pipe) {
         fprintf(stderr, "[SERVER] ERROR: Port %s:%s (SERVER) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), error_str);
       }
       else {
@@ -240,195 +232,42 @@ namespace netpp {
 
   bool TCP_Server::initialize(const char* hostname, const char* port) {
     if (is_running()) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_STARTUP;
+      emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_STARTUP);
       return false;
     }
 
-    Win32SocketPipe* server_pipe = new Win32SocketPipe(this);
-    m_server_pipe = server_pipe;
+    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
 
-    server_pipe->m_host_name = hostname;
-    server_pipe->m_port = port;
+    m_server_socket.m_pipe->on_close([this](ISocketPipe* pipe) {
+      m_purgatory_sockets.push(pipe->socket());
+      return false;
+      });
 
-    uint32_t queue_size = 0;
+    m_server_socket.m_pipe->on_error([this](ISocketPipe* pipe, ESocketErrorReason reason) {
+      emit_error(pipe, EServerError::E_ERROR_SOCKET, (int)reason);
+      return true;
+      });
 
-    sockaddr_in server_addr;
-    ::ZeroMemory(&server_addr, sizeof(server_addr));
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = ::htons(atoi(server_pipe->m_port.c_str()));
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-
-    // -----------------------------
-    // Create the socket and flag it for IOCP with RIO
-    server_pipe->m_socket = (int)::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_REGISTERED_IO);
-    if (server_pipe->m_socket == INVALID_SOCKET) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-      goto cleanup;
+    if (!m_server_socket.m_pipe->open(hostname, port)) {
+      deinitialize();
+      return false;
     }
 
-    server_pipe->m_server = this;
-
-    // Initialize RIO and friends
-    {
-      DWORD bytes = 0;
-
-      GUID rio_id = WSAID_MULTIPLE_RIO;
-      GUID acceptex_id = WSAID_ACCEPTEX;
-      GUID getacceptexsockaddrs_id = WSAID_GETACCEPTEXSOCKADDRS;
-
-      // Get the RIO extension function table
-      if (::WSAIoctl(
-        server_pipe->m_socket,
-        SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER,
-        &rio_id, sizeof(GUID),
-        &m_socket_io.rio, sizeof(RIO_EXTENSION_FUNCTION_TABLE),
-        &bytes, NULL, NULL
-      ) != 0) {
-        int error = WSAGetLastError();
-        m_error = EServerError::E_ERROR_SOCKET;
-        m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-        goto cleanup;
-      }
-
-      // Get the AcceptEx function
-      if (::WSAIoctl(
-        server_pipe->m_socket,
-        SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &acceptex_id, sizeof(GUID),
-        &m_socket_io.exio.AcceptEx, sizeof(LPFN_ACCEPTEX),
-        &bytes, NULL, NULL
-      ) != 0) {
-        m_error = EServerError::E_ERROR_SOCKET;
-        m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-        goto cleanup;
-      }
-
-      // Get the GetAcceptExSockAddrs function
-      if (::WSAIoctl(
-        server_pipe->m_socket,
-        SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &getacceptexsockaddrs_id, sizeof(GUID),
-        &m_socket_io.exio.GetAcceptExSockAddrs, sizeof(LPFN_GETACCEPTEXSOCKADDRS),
-        &bytes, NULL, NULL
-      ) != 0) {
-        m_error = EServerError::E_ERROR_SOCKET;
-        m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-        goto cleanup;
-      }
+    if (!m_server_socket.m_pipe->bind_and_listen()) {
+      deinitialize();
+      return false;
     }
-
-    server_pipe->m_iocp = ::CreateIoCompletionPort((HANDLE)server_pipe->m_socket, NULL, 0, 0);
-    if (server_pipe->m_iocp == NULL) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_SOCKET;
-      goto cleanup;
-    }
-
-    // Initialize Overlapped structure
-    ::ZeroMemory(&server_pipe->m_overlapped, sizeof(server_pipe->m_overlapped));
-
-    // Create the completion queues and request queues
-    RIO_NOTIFICATION_COMPLETION completion;
-    completion.Type = RIO_IOCP_COMPLETION;
-    completion.Iocp.IocpHandle = server_pipe->m_iocp;
-    completion.Iocp.CompletionKey = (void*)ECompletionKey::E_START;
-    completion.Iocp.Overlapped = &server_pipe->m_overlapped;
-
-    queue_size = m_recv_allocator.capacity() + m_send_allocator.capacity();
-
-    server_pipe->m_completion_queue = m_socket_io.rio.RIOCreateCompletionQueue(queue_size * RIO_PENDING_MAX, &completion);
-    if (server_pipe->m_completion_queue == RIO_INVALID_CQ) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_RESOURCES;
-      goto cleanup;
-    }
-
-    server_pipe->m_request_queue = m_socket_io.rio.RIOCreateRequestQueue(
-      server_pipe->m_socket,
-      RIO_PENDING_MAX, 1,
-      RIO_PENDING_MAX, 1,
-      server_pipe->m_completion_queue,
-      server_pipe->m_completion_queue,
-      &server_pipe
-    );
-    if (server_pipe->m_request_queue == RIO_INVALID_RQ) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_RESOURCES;
-      goto cleanup;
-    }
-
-    server_pipe->m_recv_buffer->BufferId = m_socket_io.rio.RIORegisterBuffer(m_recvbuf, m_recvbuflen);
-    if (server_pipe->m_recv_buffer->BufferId == RIO_INVALID_BUFFERID) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_RESOURCES;
-      goto cleanup;
-    }
-
-    server_pipe->m_recv_buffer->Length = m_recv_allocator.block_size();
-    server_pipe->m_recv_buf_block = m_recv_allocator.allocate();
-
-    server_pipe->m_send_buffer->BufferId = m_socket_io.rio.RIORegisterBuffer(m_sendbuf, m_sendbuflen);
-    if (server_pipe->m_send_buffer->BufferId == RIO_INVALID_BUFFERID) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_RESOURCES;
-      goto cleanup;
-    }
-    server_pipe->m_send_buffer->Length = 0;
-    server_pipe->m_send_buf_block = m_send_allocator.allocate();
-
-    // -----------------------------
-
-    if (::bind(server_pipe->m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_BIND;
-      goto cleanup;
-    }
-
-    // -----------------------------
-    // Listen on the socket to allow for an incoming connection
-    if (::listen(server_pipe->m_socket, SOMAXCONN) == SOCKET_ERROR) {
-      m_error = EServerError::E_ERROR_SOCKET;
-      m_reason = (int)ESocketErrorReason::E_REASON_LISTEN;
-      goto cleanup;
-    }
-
-    server_pipe->on_receive(m_receive_callback);
-    server_pipe->on_request(m_request_callback);
 
     m_accept_thread = std::thread(server_accept_thread, this);
     m_process_thread = std::thread(server_process_thread, this);
     m_iocp_thread = std::thread(server_iocp_thread_win32, this);
     m_cleanup_thread = std::thread(server_cleanup_thread, this);
 
-    //// Spin up notifications for the completion queues
-    //m_socket_io.rio.RIONotify(m_server_pipe->m_recv_completion_queue);
-
-  cleanup:
-    if (m_error != EServerError::E_NONE) {
-      deinitialize();
-      return false;
-    }
-
     return true;
   }
 
   void TCP_Server::deinitialize() {
     std::unique_lock<std::mutex> lock(m_mutex);
-
-    Win32SocketPipe* server_pipe = (Win32SocketPipe*)m_server_pipe;
-    if (server_pipe->m_socket != INVALID_SOCKET) {
-      ::shutdown(server_pipe->m_socket, SD_BOTH);
-      ::closesocket(server_pipe->m_socket);
-      server_pipe->m_socket = INVALID_SOCKET;
-    }
-
-    if (server_pipe->m_iocp) {
-      ::CloseHandle(server_pipe->m_iocp);
-      server_pipe->m_iocp = NULL;
-    }
 
     if (m_process_thread.joinable()) {
       m_process_thread.join();
@@ -446,39 +285,20 @@ namespace netpp {
       m_iocp_thread.join();
     }
 
-    if (server_pipe->m_completion_queue != RIO_INVALID_CQ) {
-      m_socket_io.rio.RIOCloseCompletionQueue(server_pipe->m_completion_queue);
-      server_pipe->m_completion_queue = RIO_INVALID_CQ;
+    m_server_socket.m_pipe->close();
+    delete m_server_socket.m_pipe;
+
+    m_server_socket.m_pipe = nullptr;
+
+    for (auto& pipe : m_client_sockets) {
+      delete pipe.second.m_pipe;
     }
 
-    if (server_pipe->m_request_queue != RIO_INVALID_RQ) {
-      server_pipe->m_request_queue = RIO_INVALID_RQ;
-    }
-
-    if (server_pipe->m_recv_buffer->BufferId != RIO_INVALID_BUFFERID) {
-      m_socket_io.rio.RIODeregisterBuffer(server_pipe->m_recv_buffer->BufferId);
-      server_pipe->m_recv_buffer->BufferId = RIO_INVALID_BUFFERID;
-      m_recv_allocator.deallocate(server_pipe->m_recv_buf_block);
-      server_pipe->m_recv_buf_block = StaticBlockAllocator::INVALID_BLOCK;
-    }
-
-    if (server_pipe->m_send_buffer->BufferId != RIO_INVALID_BUFFERID) {
-      m_socket_io.rio.RIODeregisterBuffer(server_pipe->m_send_buffer->BufferId);
-      server_pipe->m_send_buffer->BufferId = RIO_INVALID_BUFFERID;
-      m_send_allocator.deallocate(server_pipe->m_send_buf_block);
-      server_pipe->m_send_buf_block = StaticBlockAllocator::INVALID_BLOCK;
-    }
-
-    delete server_pipe;
-    m_server_pipe = nullptr;
-
-    for (auto& pipe : m_client_pipes) {
-      delete pipe.second;
-    }
+    m_client_sockets.clear();
   }
 
   ISocketPipe* TCP_Server::get_socket_pipe(uint64_t socket) {
-    return m_client_pipes[socket];
+    return m_client_sockets[socket].m_pipe;
   }
 
   void TCP_Server::close_socket(ISocketPipe* pipe) {
@@ -490,26 +310,27 @@ namespace netpp {
       uint64_t socket = m_awaiting_sockets.front();
       m_awaiting_sockets.pop();
 
-      Win32SocketPipe* client_pipe = new Win32SocketPipe(this);
+      ISocketPipe* client_pipe = new TCP_Socket(m_server_socket.m_pipe->get_os_layer(), &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
       client_pipe->open(socket);
+      client_pipe->clone_callbacks_from(m_server_socket.m_pipe);
 
-      client_pipe->m_on_receive = m_receive_callback;
-      client_pipe->m_on_request = m_request_callback;
-
-      m_client_pipes[socket] = client_pipe;
+      m_client_sockets[socket] = {
+        client_pipe, {0, 0}
+      };
     }
   }
 
   void TCP_Server::receive_on_sockets() {
-    for (auto& pipe : m_client_pipes) {
-      if (pipe.second->is_busy(EPipeOperation::E_RECV)) {
+    for (auto& socket : m_client_sockets) {
+      ISocketPipe* pipe = socket.second.m_pipe;
+      if (pipe->is_busy(EPipeOperation::E_RECV)) {
         continue;
       }
       std::unique_lock<std::mutex> lock(m_mutex);
-      if (!pipe.second->recv(0, NULL, NULL)) {
+      if (!pipe->recv(0, NULL, NULL)) {
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING) {
-          pipe.second->error(ESocketErrorReason::E_REASON_RECV);
+          pipe->error(ESocketErrorReason::E_REASON_RECV);
         }
       }
     }
@@ -522,7 +343,7 @@ namespace netpp {
     ZeroMemory(&from, sizeof(from));
 
     while (server->is_running()) {
-      SOCKET client_socket = ::WSAAccept(server->m_server_pipe->socket(), (sockaddr*)&from, NULL, NULL, 0);
+      SOCKET client_socket = ::WSAAccept(server->m_server_socket.m_pipe->socket(), (sockaddr*)&from, NULL, NULL, 0);
       if (client_socket == INVALID_SOCKET) {
         // Server is shutting down
         return 0;
@@ -532,7 +353,8 @@ namespace netpp {
 
       if (client_socket == INVALID_SOCKET) {
         server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_ACCEPT);
-      } else {
+      }
+      else {
         server->m_awaiting_sockets.push(client_socket);
       }
     }
@@ -542,14 +364,12 @@ namespace netpp {
 
   uint64_t TCP_Server::server_process_thread(void* param) {
     TCP_Server* server = (TCP_Server*)param;
-    Win32SocketPipe* server_pipe = (Win32SocketPipe*)server->m_server_pipe;
+    ISocketPipe* server_pipe = server->m_server_socket.m_pipe;
 
     while (server->is_running()) {
       server->integrate_pending_sockets();
 
-      int rc = server->m_socket_io.rio.RIONotify(server_pipe->m_completion_queue);
-      if (rc != ERROR_SUCCESS && rc != WSAEALREADY) {
-        server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_CORRUPT);
+      if (!server_pipe->notify_all()) {
         return 0;
       }
 
@@ -561,8 +381,7 @@ namespace netpp {
 
   uint64_t TCP_Server::server_iocp_thread_win32(void* param) {
     TCP_Server* server = (TCP_Server*)param;
-    SocketInterface& socket_io = server->m_socket_io;
-    Win32SocketPipe* server_pipe = (Win32SocketPipe*)server->m_server_pipe;
+    ISocketPipe* server_pipe = server->m_server_socket.m_pipe;
 
     DWORD transferred_;
     ULONG_PTR completion_key;
@@ -572,12 +391,12 @@ namespace netpp {
     //       Establish defined structure (should multiple sockets be handled per iocp thread?)
     //       If so, what does that look like?
     while (server->is_running()) {
-      bool success = GetQueuedCompletionStatus(server_pipe->m_iocp, &transferred_, &completion_key, &overlapped, INFINITE);
+      bool success = GetQueuedCompletionStatus((HANDLE)server->m_server_socket.m_pipe->sys_data(), &transferred_, &completion_key, &overlapped, INFINITE);
       if (!success) {
-        if (server_pipe->socket() == INVALID_SOCKET) {
+        if (server->m_server_socket.m_pipe->socket() == INVALID_SOCKET) {
           goto exit_thread;
         }
-        server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+        server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
         goto exit_thread;
       }
 
@@ -587,9 +406,9 @@ namespace netpp {
 
       {
         RIORESULT results[16];
-        ULONG count = socket_io.rio.RIODequeueCompletion(server_pipe->m_completion_queue, results, 16);
+        ULONG count = socket_io.rio.RIODequeueCompletion(server->m_server_socket.m_pipe->m_completion_queue, results, 16);
         if (count == RIO_CORRUPT_CQ) {
-          server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+          server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
           goto exit_thread;
         }
 
@@ -597,13 +416,16 @@ namespace netpp {
           RIORESULT* result = &results[i];
 
           Tag_RIO_BUF* buf = (Tag_RIO_BUF*)result->RequestContext;
-          Win32SocketPipe* pipe = (Win32SocketPipe*)buf->Pipe;
+          ISocketOSSupportLayer* pipe = buf->Pipe;
+
+          SocketData& sock_data = server->m_client_sockets[pipe->socket()];
 
           if (result->Status != NO_ERROR) {
-            if (buf->Operation == ESocketOperation::E_RECV) {
-              server_pipe->error(ESocketErrorReason::E_REASON_RECV);
-            } else {
-              server_pipe->error(ESocketErrorReason::E_REASON_SEND);
+            if (buf->Operation == EPipeOperation::E_RECV) {
+              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_RECV);
+            }
+            else {
+              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_SEND);
             }
             continue;
           }
@@ -611,7 +433,7 @@ namespace netpp {
           buf->IsBusy = false;
 
           switch (buf->Operation) {
-          case ESocketOperation::E_RECV: {
+          case EPipeOperation::E_RECV: {
 
             // Get the transfered data if received
             if (result->BytesTransferred == 0) {
@@ -624,35 +446,36 @@ namespace netpp {
 
             IApplicationLayerAdapter* adapter = ApplicationAdapterFactory::detect(recv_buf, result->BytesTransferred);
             if (!adapter) {
-              server_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
               continue;
             }
 
-            if (!adapter->on_receive(pipe, recv_buf, result->BytesTransferred, 0)) {
-              server_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+            if (!adapter->on_receive(sock_data.m_pipe, recv_buf, result->BytesTransferred, 0)) {
+              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
               continue;
             }
             break;
           }
-          case ESocketOperation::E_SEND: {
+          case EPipeOperation::E_SEND: {
             // Check if the send is incomplete (chunking the data)
-            pipe->m_send_offset += result->BytesTransferred;
-            if (pipe->m_send_offset < pipe->m_send_size) {
+            sock_data.m_state.m_bytes_sent += result->BytesTransferred;
+
+            const int32_t bytes_left = sock_data.m_state.m_bytes_total - sock_data.m_state.m_bytes_sent;
+            if (bytes_left > 0) {
               // Send the remaining data
-              uint32_t flags = SKIP_BUF_INIT_FLAG;
-              pipe->send(pipe->m_send_data + pipe->m_send_offset, pipe->m_send_size - pipe->m_send_offset, &flags);
+              pipe->send(sock_data.m_state.m_bytes_buf + sock_data.m_state.m_bytes_sent, bytes_left, nullptr);
             }
             else {
               // Send is complete
-              pipe->m_send_offset = 0;
-              pipe->m_send_size = 0;
+              sock_data.m_state.m_bytes_sent = 0;
+              sock_data.m_state.m_bytes_total = 0;
 
-              delete[] pipe->m_send_data;
-              pipe->m_send_data = nullptr;
+              delete[] sock_data.m_state.m_bytes_buf;
+              sock_data.m_state.m_bytes_buf = nullptr;
             }
             break;
           }
-          case ESocketOperation::E_CLOSE: {
+          case EPipeOperation::E_CLOSE: {
             pipe->close();
             break;
           }
@@ -669,20 +492,15 @@ namespace netpp {
     TCP_Server* server = (TCP_Server*)param;
 
     while (server->is_running()) {
-
       if (server->m_purgatory_sockets.size() > 0) {
         uint64_t socket = server->m_purgatory_sockets.front();
         server->m_purgatory_sockets.pop();
 
-        Win32SocketPipe* pipe = (Win32SocketPipe*)server->m_client_pipes[socket];
-        if (pipe) {
-          ::shutdown(socket, SD_BOTH);
-          ::closesocket(socket);
-
-          server->m_recv_allocator.deallocate(pipe->m_recv_buf_block);
-          server->m_send_allocator.deallocate(pipe->m_send_buf_block);
-          server->m_client_pipes.erase(socket);
-          delete pipe;
+        SocketData& sock_data = server->m_client_sockets[socket];
+        if (sock_data.m_pipe) {
+          // Pipe cleaned itself up earlier by the call to close
+          server->m_client_sockets.erase(socket);
+          delete sock_data.m_pipe;
         }
 
         if (server->m_socket_threads.find(socket) != server->m_socket_threads.end()) {
@@ -693,198 +511,6 @@ namespace netpp {
     }
 
     return 0;
-  }
-
-  char* TCP_Server::Win32SocketPipe::recv_buf() {
-    return (char*)m_server->m_recv_allocator.ptr(m_recv_buf_block);
-  }
-
-  uint32_t TCP_Server::Win32SocketPipe::recv_buf_size() {
-    return m_server->m_recv_allocator.block_size();
-  }
-
-  char* TCP_Server::Win32SocketPipe::send_buf() {
-    return (char*)m_server->m_send_allocator.ptr(m_send_buf_block);
-  }
-
-  uint32_t TCP_Server::Win32SocketPipe::send_buf_size() {
-    return m_server->m_send_allocator.block_size();
-  }
-
-  bool TCP_Server::Win32SocketPipe::is_busy(EPipeOperation op) const {
-    switch (op) {
-    case EPipeOperation::E_RECV:
-      return m_recv_buffer->IsBusy;
-    case EPipeOperation::E_SEND:
-      return m_send_buffer->IsBusy;
-    case EPipeOperation::E_BOTH:
-      return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
-    }
-    return false;
-  }
-
-  bool TCP_Server::Win32SocketPipe::open(const char* hostname, const char* port) {
-    if (!m_server) {
-      return false;
-    }
-
-    Win32SocketPipe* server_pipe = (Win32SocketPipe*)m_server->m_server_pipe;
-
-    m_host_name = hostname;
-    m_port = port;
-
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(atoi(port));
-    inet_pton(AF_INET, hostname, &addr.sin_addr);
-
-    uint64_t socket_ = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_REGISTERED_IO);
-    if (socket_ == INVALID_SOCKET) {
-      return false;
-    }
-
-    ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
-
-    m_recv_buf_block = m_server->m_recv_allocator.allocate();
-    m_recv_buffer = new Tag_RIO_BUF(*server_pipe->m_recv_buffer);
-    m_recv_buffer->Offset = m_server->m_recv_allocator.ofs(m_recv_buf_block);
-    m_recv_buffer->Pipe = this;
-
-    m_send_buf_block = m_server->m_send_allocator.allocate();
-    m_send_buffer = new Tag_RIO_BUF(*server_pipe->m_send_buffer);
-    m_send_buffer->Offset = m_server->m_send_allocator.ofs(m_send_buf_block);
-    m_send_buffer->Pipe = this;
-
-    m_completion_queue = server_pipe->m_completion_queue;
-    m_completion_queue = server_pipe->m_completion_queue;
-
-    m_request_queue = m_server->m_socket_io.rio.RIOCreateRequestQueue(
-      socket_,
-      RIO_PENDING_MAX, 1,
-      RIO_PENDING_MAX, 1,
-      m_completion_queue,
-      m_completion_queue,
-      this
-    );
-
-    m_iocp = server_pipe->m_iocp;
-    m_socket = socket_;
-    return true;
-  }
-
-  bool TCP_Server::Win32SocketPipe::open(uint64_t socket_) {
-    if (!m_server) {
-      return false;
-    }
-
-    Win32SocketPipe* server_pipe = (Win32SocketPipe*)m_server->m_server_pipe;
-
-    int namelen = sizeof(sockaddr_in);
-    sockaddr_in addr;
-
-    int rc = getpeername(socket_, (sockaddr*)&addr, &namelen);
-    if (rc == SOCKET_ERROR) {
-      return false;
-    }
-
-    m_host_name.resize(INET_ADDRSTRLEN + 1);
-    inet_ntop(AF_INET, &addr.sin_addr, (char*)m_host_name.data(), INET_ADDRSTRLEN);
-
-    m_port = std::to_string(ntohs(addr.sin_port));
-
-    ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
-
-    m_recv_buf_block = m_server->m_recv_allocator.allocate();
-    m_recv_buffer = new Tag_RIO_BUF(*server_pipe->m_recv_buffer);
-    m_recv_buffer->Offset = m_server->m_recv_allocator.ofs(m_recv_buf_block);
-    m_recv_buffer->Pipe = this;
-
-    m_send_buf_block = m_server->m_send_allocator.allocate();
-    m_send_buffer = new Tag_RIO_BUF(*server_pipe->m_send_buffer);
-    m_send_buffer->Offset = m_server->m_send_allocator.ofs(m_send_buf_block);
-    m_send_buffer->Pipe = this;
-
-    m_completion_queue = server_pipe->m_completion_queue;
-    m_completion_queue = server_pipe->m_completion_queue;
-
-    m_request_queue = m_server->m_socket_io.rio.RIOCreateRequestQueue(
-      socket_,
-      RIO_PENDING_MAX, 1,
-      RIO_PENDING_MAX, 1,
-      m_completion_queue,
-      m_completion_queue,
-      this
-    );
-
-    m_iocp = server_pipe->m_iocp;
-    m_socket = socket_;
-    return true;
-  }
-
-  void TCP_Server::Win32SocketPipe::close() {
-    m_server->close_socket(this);
-  }
-
-  void TCP_Server::Win32SocketPipe::error(ESocketErrorReason reason) {
-    m_server->emit_error(this, EServerError::E_ERROR_SOCKET, (int)reason);
-  }
-
-  bool TCP_Server::Win32SocketPipe::recv(uint32_t offset, uint32_t* flags, uint32_t* unused) {
-    if (m_recv_buffer->IsBusy) {
-      return FALSE;
-    }
-
-    m_recv_buffer->Offset = m_server->m_recv_allocator.ofs(m_recv_buf_block) + offset;
-
-    SocketInterface& socket_io = m_server->m_socket_io;
-    BOOL rc = socket_io.rio.RIOReceive(m_request_queue, m_recv_buffer, 1, NULL, m_recv_buffer);
-    if (rc) {
-      m_recv_buffer->IsBusy = TRUE;
-    }
-    return rc;
-  }
-
-  bool TCP_Server::Win32SocketPipe::send(const char* data, uint32_t size, uint32_t* flags) {
-    if (m_send_buffer->IsBusy) {
-      return FALSE;
-    }
-
-    SocketInterface& socket_io = m_server->m_socket_io;
-
-    char* send_buf = (char*)m_server->m_send_allocator.ptr(m_send_buf_block);
-    uint32_t block_size = m_server->m_send_allocator.block_size();
-
-    uint32_t chunk_size = min(size, block_size);
-    memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
-    m_send_buffer->Length = (ULONG)chunk_size;
-
-    uint32_t flags_ = flags ? *flags : 0;
-
-    BOOL rc = socket_io.rio.RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~SKIP_BUF_INIT_FLAG, m_send_buffer);
-    if (rc) {
-      if ((flags_ & SKIP_BUF_INIT_FLAG) == 0) {
-        m_send_data = data;
-        m_send_size = size;
-      }
-      m_send_buffer->IsBusy = TRUE;
-    }
-    return rc;
-  }
-
-  bool TCP_Server::Win32SocketPipe::send(const HTTP_Response* response) {
-    uint32_t request_buf_size = 0;
-    const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
-  }
-
-  bool TCP_Server::Win32SocketPipe::send(const HTTP_Request* request) {
-    uint32_t request_buf_size = 0;
-    const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
-  }
-
-  bool TCP_Server::Win32SocketPipe::send(const RawPacket* packet) {
-    return send(packet->m_message, packet->m_length, NULL) != 0;
   }
 
 }  // namespace netpp

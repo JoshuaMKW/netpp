@@ -1,20 +1,28 @@
+
+
 #include <chrono>
 #include <iostream>
 #include <thread>
 
-#include <openssl/evp.h>
-#include <openssl/rand.h>
-
 #include "network.h"
 #include "socket.h"
 
-using namespace std::chrono_literals;
+#include "server.h"
+
 using namespace std::chrono;
+using namespace std::chrono_literals;
 
 #ifdef _WIN32
 
 #pragma comment(lib, "ws2_32.lib")
 #include <MSWSock.h>
+
+#define RIO_PENDING_MAX 5
+#define RIO_MAX_BUFFERS 1024
+
+#define SKIP_BUF_INIT_FLAG 0x80000000
+
+#define CLIENT_USE_WSA false
 
 namespace netpp {
 
@@ -44,103 +52,883 @@ void sockets_deinitialize() {
 
 namespace netpp {
 
-  bool TLS_SocketProxy::open(const char* hostname, const char* port) {
-    return m_pipe->open(hostname, port);
+  enum class ECompletionKey : DWORD {
+    E_STOP,
+    E_START,
+  };
+
+  RIO_EXTENSION_FUNCTION_TABLE* s_rio;
+
+  static int _win32_init_rio(SOCKET in_sock) {
+    if (s_rio) {
+      return 0;
+    }
+
+    sockets_initialize();
+
+    s_rio = new RIO_EXTENSION_FUNCTION_TABLE();
+
+    DWORD bytes = 0;
+
+    GUID rio_id = WSAID_MULTIPLE_RIO;
+    GUID acceptex_id = WSAID_ACCEPTEX;
+    GUID getacceptexsockaddrs_id = WSAID_GETACCEPTEXSOCKADDRS;
+
+    // Get the RIO extension function table
+    if (::WSAIoctl(
+      in_sock,
+      SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER,
+      &rio_id, sizeof(GUID),
+      s_rio, sizeof(RIO_EXTENSION_FUNCTION_TABLE),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    return 0;
   }
 
-  void TLS_SocketProxy::close() {
-    m_pipe->close();
+  static int _win32_deinit_rio(SOCKET in_sock) {
+    sockets_initialize();
+
+    if (!s_rio) {
+      return 0;
+    }
+
+    delete s_rio;
+    return 0;
   }
 
-  bool TLS_SocketProxy::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
-    return m_pipe->recv(offset, flags, transferred_out);
-  }
+  struct Tag_WSA_BUF : public WSABUF {
+    Tag_WSA_BUF(CHAR* buffer, DWORD length, EPipeOperation operation, ISocketOSSupportLayer* owner) {
+      this->buf = buffer;
+      this->len = length;
+      this->Operation = operation;
+      this->Pipe = owner;
+      this->IsBusy = FALSE;
+    }
 
-  bool TLS_SocketProxy::proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) {
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    EPipeOperation Operation;
+    ISocketOSSupportLayer* Pipe;
+    BOOL IsBusy;
+  };
 
-    uint8_t* tag = (uint8_t*)(in_data + iv_size);
-    uint8_t* iv = (uint8_t*)in_data;
-    
-    // Initialize decryption
-    EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL);
-    EVP_DecryptInit_ex(ctx, NULL, NULL, tag, iv);
+  struct Tag_WSA_OVERLAPPED : public WSAOVERLAPPED {
+    Tag_WSA_OVERLAPPED(WSABUF* buffer, EPipeOperation operation, ISocketOSSupportLayer* owner) {
+      this->Internal = 0;
+      this->InternalHigh = 0;
+      this->Offset = 0;
+      this->OffsetHigh = 0;
+      this->hEvent = nullptr;
+      this->Operation = operation;
+      this->Pipe = owner;
+      this->Buffer = buffer;
+    }
 
-    uint32_t offset = iv_size + tag_size;
+    EPipeOperation Operation;
+    ISocketOSSupportLayer* Pipe;
+    WSABUF* Buffer;
+  };
 
-    if (in_size <= offset) {
+  class Win32ClientSocketLayer : public ISocketOSSupportLayer {
+  public:
+    Win32ClientSocketLayer(ISocketOSSupportLayer* owner_socket_layer,
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol) {
+      m_socket = INVALID_SOCKET;
+      m_recv_buffer = new Tag_WSA_BUF{
+        nullptr,
+        0,
+        EPipeOperation::E_RECV,
+        this
+      };
+      m_send_buffer = new Tag_WSA_BUF{
+        nullptr,
+        0,
+        EPipeOperation::E_SEND,
+        this
+      };
+      m_recv_overlapped = new Tag_WSA_OVERLAPPED{
+        m_send_buffer,
+        EPipeOperation::E_RECV,
+        this
+      };
+      m_send_overlapped = new Tag_WSA_OVERLAPPED{
+        m_recv_buffer,
+        EPipeOperation::E_SEND,
+        this
+      };
+      m_iocp = INVALID_HANDLE_VALUE;
+      m_owner_socket_layer = owner_socket_layer;
+      m_connected = false;
+      m_connecting = false;
+      m_protocol = protocol;
+    }
+
+    ~Win32ClientSocketLayer() override {
+      delete m_recv_buffer;
+      delete m_send_buffer;
+      delete m_recv_overlapped;
+      delete m_send_overlapped;
+
+      if (m_socket != INVALID_SOCKET) {
+        ::shutdown(m_socket, SD_BOTH);
+        ::closesocket(m_socket);
+        m_socket = INVALID_SOCKET;
+      }
+    }
+
+    uint64_t socket() const override {
+      return (uint64_t)m_socket;
+    }
+
+    ETransportLayerProtocol protocol() const override {
+      return m_protocol;
+    }
+
+    bool is_busy(EPipeOperation op) const override {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        return m_recv_busy;
+      case EPipeOperation::E_SEND:
+        return m_send_busy;
+      case EPipeOperation::E_RECV_SEND:
+        return m_recv_busy || m_send_busy;
+      }
       return false;
     }
 
-    // Cyphertext decryption
-    int _in_s = (int)in_size;
-    int _out_s;
-    EVP_DecryptUpdate(ctx, (uint8_t*)out_data, &_out_s, (uint8_t*)(in_data + offset), in_size - offset);
+    void set_busy(EPipeOperation op, bool busy) override {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        m_recv_busy = busy;
+        return;
+      case EPipeOperation::E_SEND:
+        m_send_busy = busy;
+        return;
+      case EPipeOperation::E_RECV_SEND:
+        m_recv_busy = busy;
+        m_send_busy = busy;
+        return;
+      }
+      return;
+    }
 
-    // Set the expected auth tag
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, tag_size, tag);
+    bool open(const char* hostname, const char* port) override {
+      m_recv_buf_block = m_recv_allocator->allocate();
+      m_recv_buffer->buf = (CHAR*)m_recv_allocator->ptr(m_recv_buf_block);
+      m_recv_buffer->len = (ULONG)m_recv_allocator->block_size();
+      m_recv_buffer->Pipe = this;
 
-    int ret = EVP_DecryptFinal_ex(ctx, (uint8_t*)(out_data + _out_s), &_out_s);
+      m_send_buf_block = m_send_allocator->allocate();
+      m_send_buffer->buf = (CHAR*)m_send_allocator->ptr(m_send_buf_block);
+      m_send_buffer->len = 0;
+      m_send_buffer->Pipe = this;
 
-    EVP_CIPHER_CTX_free(ctx);
+#if 0
+      if (m_socket != INVALID_SOCKET) {
+        m_host_name = hostname;
+        m_port = port;
+        m_connecting = true;
+        return true;
+      }
+#endif
 
-    return ret > 0;
-  }
+      uint64_t socket_ = INVALID_SOCKET;
 
-  // Application surrenders ownership of the buffer
-  bool TLS_SocketProxy::send(const char* data, uint32_t size, uint32_t* flags) {
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+#if CLIENT_USE_WSA
+      // -----------------------------
+      // Create the socket and flag it for IOCP
 
-    uint32_t crypt_size = iv_size + tag_size + size;
-    uint8_t* crypt_data = (uint8_t*)malloc(crypt_size);
+      switch (m_protocol) {
+      case ETransportLayerProtocol::E_TCP: {
+        socket_ = (int)::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+        if (socket_ == INVALID_SOCKET) {
+          error(ESocketErrorReason::E_REASON_SOCKET);
+          return false;
+        }
+      }
+      case ETransportLayerProtocol::E_UDP: {
+        socket_ = (int)::WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_OVERLAPPED);
+        if (socket_ == INVALID_SOCKET) {
+          error(ESocketErrorReason::E_REASON_SOCKET);
+          return false;
+        }
+      }
+      }
+      // -----------------------------
 
-    // Initialize the iv descriptor
-    RAND_bytes(crypt_data, iv_size);
+      m_recv_overlapped->hEvent = NULL;
+      m_send_overlapped->hEvent = NULL;
 
-    // Encryption initialization
-    EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL);
-    EVP_EncryptInit_ex(ctx, NULL, NULL, m_aes_key, crypt_data);
+      m_iocp = ::CreateIoCompletionPort((HANDLE)m_iocp, NULL, (int)ECompletionKey::E_START, 0);
+      if (m_iocp == NULL) {
+        error(ESocketErrorReason::E_REASON_SOCKET);
+        return false;
+      }
 
-    int _in_size = (int)size;
+      GUID guid = WSAID_DISCONNECTEX;
+      DWORD bytes = 0;
+      if (WSAIoctl(socket_, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(GUID), &DisconnectEx, sizeof(LPFN_DISCONNECTEX), &bytes, NULL, NULL) == SOCKET_ERROR) {
+        error(ESocketErrorReason::E_REASON_SOCKET);
+        return false;
+      }
+#else
+      switch (m_protocol) {
+      case ETransportLayerProtocol::E_TCP: {
+        socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (socket_ == INVALID_SOCKET) {
+          error(ESocketErrorReason::E_REASON_SOCKET);
+          return false;
+        }
+      }
+      case ETransportLayerProtocol::E_UDP: {
+        socket_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (socket_ == INVALID_SOCKET) {
+          error(ESocketErrorReason::E_REASON_SOCKET);
+          return false;
+        }
+      }
+      }
+#endif
 
-    // Plaintext encryption
-    int out_size;
-    EVP_EncryptUpdate(ctx, crypt_data + iv_size + tag_size, &out_size, (uint8_t*)data, size);
+      return open(socket_);
+    }
 
-    if (crypt_size != out_size + tag_size) {
+    bool open(uint64_t socket_) override {
+      m_socket = socket_;
+      m_connecting = true;
+      return true;
+    }
+
+    void close() override {
+      if (!m_on_close || !m_on_close(this)) {
+        if (m_socket != INVALID_SOCKET) {
+#if 1
+          ::shutdown(m_socket, SD_BOTH);
+          ::closesocket(m_socket);
+          m_connected = false;
+          m_connecting = false;
+          m_socket = INVALID_SOCKET;
+#else
+          if (!DisconnectEx(m_socket, m_recv_overlapped, TF_REUSE_SOCKET, NULL)) {
+            if (::WSAGetLastError() != WSA_IO_PENDING) {
+              error(ESocketErrorReason::E_REASON_SOCKET);
+            }
+          }
+          m_connected = false;
+#endif
+        }
+
+        if (m_iocp) {
+          ::CloseHandle(m_iocp);
+          m_iocp = NULL;
+        }
+      }
+    }
+
+    void error(ESocketErrorReason reason) override {
+      if (!m_on_error || !m_on_error(this, reason)) {
+        fprintf(stderr, "Unhandled error (%d)", (int)reason);
+      }
+    }
+
+    bool notify_all() override {
+      return true;
+    }
+
+    bool sync(uint64_t wait_time) override {
+      if (wait_time == 0) {
+        while (is_busy(EPipeOperation::E_RECV_SEND)) {
+          std::this_thread::sleep_for(10ms);
+        }
+        return true;
+      }
+
+      time_point<high_resolution_clock> start_time = high_resolution_clock::now();
+      while (is_busy(EPipeOperation::E_RECV_SEND)) {
+        time_point<high_resolution_clock> now_time = high_resolution_clock::now();
+        if ((now_time - start_time).count() > (int64_t)wait_time) {
+          return false;
+        }
+        std::this_thread::sleep_for(10ms);
+      }
+
+      return true;
+    }
+
+    bool bind_and_listen(const char* addr, uint32_t backlog) override {
       return false;
     }
 
-    // Finalize encryption
-    EVP_EncryptFinal_ex(ctx, crypt_data + size, &out_size);
+    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
+      if (m_recv_buffer->IsBusy) {
+        return false;
+      }
 
-    if (out_size != tag_size) {
+#if CLIENT_USE_WSA
+      bool rc = ::WSARecv(m_socket, m_recv_buffer, 1, NULL, (LPDWORD)flags, m_recv_overlapped, NULL);
+      if (!rc) {
+        int err = ::WSAGetLastError();
+        if (err == WSA_IO_PENDING) {
+          m_recv_buffer->IsBusy = TRUE;
+        }
+        else if (err != 0) {
+          error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+      }
+      return true;
+#else
+      int flags_ = flags ? *flags : 0;
+      *transferred_out = ::recv(m_socket, m_recv_buffer->buf + offset, recv_buf_size() - offset, flags_);
+      if (*transferred_out == 0) {
+        error(ESocketErrorReason::E_REASON_PORT);
+        return false;
+      }
+      else if (*(int*)transferred_out == INVALID_SOCKET) {
+        error(ESocketErrorReason::E_REASON_SOCKET);
+        return false;
+      }
+      return true;
+#endif
+    }
+
+    bool send(const char* data, uint32_t size, uint32_t* flags) override {
+      if (m_send_buffer->IsBusy) {
+        return false;
+      }
+
+      using namespace std::chrono;
+
+      size = min(size, send_buf_size());
+      memcpy_s(m_send_buffer->buf, send_buf_size(), data, size);
+      m_send_buffer->len = size;
+
+      uint32_t flags_ = flags ? *flags : 0;
+
+#if CLIENT_USE_WSA
+      bool rc = WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
+      if (!rc) {
+        int err = ::WSAGetLastError();
+        if (err == WSA_IO_PENDING) {
+          m_send_buffer->IsBusy = TRUE;
+        }
+        else if (err != 0) {
+          error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+      }
+      return true;
+#else
+      int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
+      if (rc == SOCKET_ERROR) {
+        error(ESocketErrorReason::E_REASON_SEND);
+        return false;
+      }
+      return true;
+#endif
+    }
+
+    char* recv_buf() const override {
+      return (char*)m_recv_allocator->ptr(m_recv_buf_block);
+    }
+
+    uint32_t recv_buf_size() const override {
+      return m_recv_allocator->block_size();
+    }
+
+    char* send_buf() const override {
+      return (char*)m_send_allocator->ptr(m_send_buf_block);
+    }
+
+    uint32_t send_buf_size() const override {
+      return m_send_allocator->block_size();
+    }
+
+    void set_recv_buf(char* buf) override {}
+    void set_recv_buf_size(uint32_t size) override {}
+    void set_send_buf(const char* buf) override {}
+    void set_send_buf_size(uint32_t size) override {}
+
+    void* sys_data() const override { return m_iocp; }
+    void* user_data() const override { return nullptr; }
+
+    void on_close(close_cb cb) { m_on_close = cb; }
+    void on_error(error_cb cb) { m_on_error = cb; }
+
+  private:
+    ISocketOSSupportLayer* m_owner_socket_layer;
+    StaticBlockAllocator* m_recv_allocator;
+    StaticBlockAllocator* m_send_allocator;
+    close_cb m_on_close;
+    error_cb m_on_error;
+
+    SOCKET m_socket;
+
+    uint32_t m_recv_buf_block;
+    uint32_t m_send_buf_block;
+
+    Tag_WSA_BUF* m_recv_buffer;
+    Tag_WSA_BUF* m_send_buffer;
+
+    HANDLE m_iocp;
+    Tag_WSA_OVERLAPPED* m_recv_overlapped;
+    Tag_WSA_OVERLAPPED* m_send_overlapped;
+
+    LPFN_DISCONNECTEX DisconnectEx;
+
+    bool m_connected;
+    bool m_connecting;
+    bool m_recv_busy;
+    bool m_send_busy;
+
+    ETransportLayerProtocol m_protocol;
+  };
+
+  struct Tag_RIO_BUF : public RIO_BUF {
+    Tag_RIO_BUF(RIO_BUFFERID buffer_id, DWORD offset, DWORD length, EPipeOperation operation, ISocketOSSupportLayer* owner) {
+      this->BufferId = buffer_id;
+      this->Offset = offset;
+      this->Length = length;
+      this->Operation = operation;
+      this->Pipe = owner;
+      this->IsBusy = FALSE;
+    }
+
+    EPipeOperation Operation;
+    ISocketOSSupportLayer* Pipe;
+    BOOL IsBusy;
+  };
+
+  class Win32ServerSocketLayer : public ISocketOSSupportLayer {
+  public:
+    Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol) {
+      m_socket = INVALID_SOCKET;
+      m_recv_buffer = new Tag_RIO_BUF{
+        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
+        0,
+        0,
+        EPipeOperation::E_RECV,
+        this
+      };
+      m_send_buffer = new Tag_RIO_BUF{
+        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
+        0,
+        0,
+        EPipeOperation::E_SEND,
+        this
+      };
+      m_completion_queue = RIO_INVALID_CQ;
+      m_request_queue = RIO_INVALID_RQ;
+      m_iocp = INVALID_HANDLE_VALUE;
+      m_overlapped = { 0 };
+      m_owner_socket_layer = owner_socker_layer;
+
+      m_protocol = protocol;
+    }
+
+    ~Win32ServerSocketLayer() override {
+      delete m_recv_buffer;
+      delete m_send_buffer;
+
+      if (m_socket != INVALID_SOCKET) {
+        ::shutdown(m_socket, SD_BOTH);
+        ::closesocket(m_socket);
+        m_socket = INVALID_SOCKET;
+      }
+    }
+
+    uint64_t socket() const override {
+      return (uint64_t)m_socket;
+    }
+
+    ETransportLayerProtocol protocol() const override {
+      return m_protocol;
+    }
+
+    bool is_busy(EPipeOperation op) const override {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        return m_recv_buffer->IsBusy;
+      case EPipeOperation::E_SEND:
+        return m_send_buffer->IsBusy;
+      case EPipeOperation::E_RECV_SEND:
+        return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
+      }
       return false;
     }
 
-    // Get auth tag
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, (int)tag_size, crypt_data + iv_size);
+    void set_busy(EPipeOperation op, bool busy) override {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        m_recv_buffer->IsBusy = busy;
+        return;
+      case EPipeOperation::E_SEND:
+        m_send_buffer->IsBusy = busy;
+        return;
+      case EPipeOperation::E_RECV_SEND:
+        m_recv_buffer->IsBusy = busy;
+        m_send_buffer->IsBusy = busy;
+        return;
+      }
+      return;
+    }
 
-    m_pipe->send((const char*)crypt_data, crypt_size, flags);
+    bool open(const char* hostname, const char* port) override {
+      Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
 
-    EVP_CIPHER_CTX_free(ctx);
+      sockaddr_in addr;
+      addr.sin_family = AF_INET;
+      addr.sin_port = htons(atoi(port));
+      inet_pton(AF_INET, hostname, &addr.sin_addr);
+
+      uint64_t socket_ = 0;
+
+      switch (m_protocol) {
+      case ETransportLayerProtocol::E_TCP: {
+        socket_ = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_REGISTERED_IO);
+        if (socket_ == INVALID_SOCKET) {
+          return false;
+        }
+        break;
+      }
+      case ETransportLayerProtocol::E_UDP: {
+        socket_ = ::WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_REGISTERED_IO);
+        if (socket_ == INVALID_SOCKET) {
+          return false;
+        }
+        break;
+      }
+      }
+
+      return open(socket_);
+    }
+
+    bool open(uint64_t socket_) override {
+      Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
+
+      int namelen = sizeof(sockaddr_in);
+      sockaddr_in addr;
+
+      int rc = getpeername(socket_, (sockaddr*)&addr, &namelen);
+      if (rc == SOCKET_ERROR) {
+        return false;
+      }
+
+      ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
+
+      m_recv_buf_block = m_recv_allocator->allocate();
+      m_send_buf_block = m_send_allocator->allocate();
+
+      if (server_pipe) {
+        // In this circumstance, it is inheriting resources from the server
+        *m_recv_buffer = *server_pipe->m_recv_buffer;
+        m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
+        m_recv_buffer->Pipe = this;
+
+        *m_send_buffer = *server_pipe->m_send_buffer;
+        m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
+        m_send_buffer->Pipe = this;
+
+        m_completion_queue = server_pipe->m_completion_queue;
+        m_iocp = server_pipe->m_iocp;
+      }
+      else {
+        // In this circumstance, this is the server and it needs new resources
+        m_recv_buffer->BufferId = s_rio->RIORegisterBuffer(
+          (PCHAR)m_recv_allocator->ptr(m_recv_buf_block),
+          m_recv_allocator->block_size() * m_recv_allocator->capacity()
+        );
+        if (m_recv_buffer->BufferId == RIO_INVALID_BUFFERID) {
+          error(ESocketErrorReason::E_REASON_RESOURCES);
+          return false;
+        }
+        m_recv_buffer->Length = m_recv_allocator->block_size();
+        m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
+        m_recv_buffer->Pipe = this;
+
+        m_send_buffer->BufferId = s_rio->RIORegisterBuffer(
+          (PCHAR)m_send_allocator->ptr(m_send_buf_block),
+          m_send_allocator->block_size() * m_send_allocator->capacity()
+        );
+        if (m_send_buffer->BufferId == RIO_INVALID_BUFFERID) {
+          error(ESocketErrorReason::E_REASON_RESOURCES);
+          s_rio->RIODeregisterBuffer(m_recv_buffer->BufferId);
+          return false;
+        }
+        m_send_buffer->Length = 0;
+        m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
+        m_send_buffer->Pipe = this;
+
+        m_iocp = ::CreateIoCompletionPort((HANDLE)m_socket, NULL, 0, 0);
+        if (m_iocp == NULL) {
+          error(ESocketErrorReason::E_REASON_SOCKET);
+          return false;
+        }
+
+        // Initialize Overlapped structure
+        ::ZeroMemory(&m_overlapped, sizeof(m_overlapped));
+
+        // Create the completion queues and request queues
+        RIO_NOTIFICATION_COMPLETION completion;
+        completion.Type = RIO_IOCP_COMPLETION;
+        completion.Iocp.IocpHandle = m_iocp;
+        completion.Iocp.CompletionKey = (void*)ECompletionKey::E_START;
+        completion.Iocp.Overlapped = &m_overlapped;
+
+        uint32_t queue_size = m_recv_allocator->capacity() + m_send_allocator->capacity();
+
+        m_completion_queue = s_rio->RIOCreateCompletionQueue(queue_size * RIO_PENDING_MAX, &completion);
+        if (m_completion_queue == RIO_INVALID_CQ) {
+          error(ESocketErrorReason::E_REASON_RESOURCES);
+          return false;
+        }
+      }
+
+      m_request_queue = s_rio->RIOCreateRequestQueue(
+        socket_,
+        RIO_PENDING_MAX, 1,
+        RIO_PENDING_MAX, 1,
+        m_completion_queue,
+        m_completion_queue,
+        this
+      );
+
+      m_host_name.resize(INET_ADDRSTRLEN + 1);
+      inet_ntop(AF_INET, &addr.sin_addr, (char*)m_host_name.data(), INET_ADDRSTRLEN);
+
+      m_port = std::to_string(ntohs(addr.sin_port));
+
+      m_socket = socket_;
+      return true;
+    }
+
+    void close() override {
+      if (!m_on_close || !m_on_close(this)) {
+        ::shutdown(m_socket, SD_BOTH);
+        ::closesocket(m_socket);
+
+        m_recv_allocator->deallocate(m_recv_buf_block);
+        m_send_allocator->deallocate(m_send_buf_block);
+
+        if (m_owner_socket_layer) {
+          if (m_request_queue != RIO_INVALID_RQ) {
+            m_request_queue = RIO_INVALID_RQ;
+          }
+        }
+        else {
+          if (m_completion_queue != RIO_INVALID_CQ) {
+            s_rio->RIOCloseCompletionQueue(m_completion_queue);
+            m_completion_queue = RIO_INVALID_CQ;
+          }
+
+          if (m_recv_buffer->BufferId != RIO_INVALID_BUFFERID) {
+            s_rio->RIODeregisterBuffer(m_recv_buffer->BufferId);
+            m_recv_buffer->BufferId = RIO_INVALID_BUFFERID;
+            m_recv_buf_block = StaticBlockAllocator::INVALID_BLOCK;
+          }
+
+          if (m_send_buffer->BufferId != RIO_INVALID_BUFFERID) {
+            s_rio->RIODeregisterBuffer(m_send_buffer->BufferId);
+            m_send_buffer->BufferId = RIO_INVALID_BUFFERID;
+            m_send_buf_block = StaticBlockAllocator::INVALID_BLOCK;
+          }
+
+          if (m_iocp) {
+            ::CloseHandle(m_iocp);
+            m_iocp = NULL;
+          }
+        }
+      }
+    }
+
+    void error(ESocketErrorReason reason) override {
+      if (!m_on_error || !m_on_error(this, reason)) {
+        fprintf(stderr, "Unhandled error (%d)", (int)reason);
+      }
+    }
+
+    bool notify_all() override {
+      int rc = s_rio->RIONotify(m_completion_queue);
+      if (rc != ERROR_SUCCESS && rc != WSAEALREADY) {
+        error(ESocketErrorReason::E_REASON_CORRUPT);
+        return false;
+      }
+      return true;
+    }
+
+    bool sync(uint64_t wait_time) override {
+      if (wait_time == 0) {
+        while (is_busy(EPipeOperation::E_RECV_SEND)) {
+          std::this_thread::sleep_for(10ms);
+        }
+        return true;
+      }
+
+      time_point<high_resolution_clock> start_time = high_resolution_clock::now();
+      while (is_busy(EPipeOperation::E_RECV_SEND)) {
+        time_point<high_resolution_clock> now_time = high_resolution_clock::now();
+        if ((now_time - start_time).count() > (int64_t)wait_time) {
+          return false;
+        }
+        std::this_thread::sleep_for(10ms);
+      }
+
+      return true;
+    }
+
+    bool bind_and_listen(const char* addr, uint32_t backlog) override {
+      sockaddr_in server_addr;
+      ::ZeroMemory(&server_addr, sizeof(server_addr));
+
+      server_addr.sin_family = AF_INET;
+      server_addr.sin_port = ::htons(atoi(m_port.c_str()));
+
+      if (addr) {
+        inet_pton(server_addr.sin_family, addr, &server_addr.sin_addr);
+      }
+      else {
+        server_addr.sin_addr.s_addr = INADDR_ANY;
+      }
+
+      if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        error(ESocketErrorReason::E_REASON_BIND);
+        return false;
+      }
+
+      // -----------------------------
+      // Listen on the socket to allow for an incoming connection
+      if (::listen(m_socket, backlog) == SOCKET_ERROR) {
+        error(ESocketErrorReason::E_REASON_LISTEN);
+        return false;
+      }
+
+      return true;
+    }
+
+    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
+      if (m_recv_buffer->IsBusy) {
+        return FALSE;
+      }
+
+      m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block) + offset;
+
+      BOOL rc = s_rio->RIOReceive(m_request_queue, m_recv_buffer, 1, NULL, m_recv_buffer);
+      if (rc) {
+        m_recv_buffer->IsBusy = TRUE;
+      }
+      return rc;
+    }
+
+    bool send(const char* data, uint32_t size, uint32_t* flags) override {
+      if (m_send_buffer->IsBusy) {
+        return FALSE;
+      }
+
+      char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
+      uint32_t block_size = m_send_allocator->block_size();
+
+      uint32_t chunk_size = min(size, block_size);
+      memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
+      m_send_buffer->Length = (ULONG)chunk_size;
+
+      uint32_t flags_ = flags ? *flags : 0;
+
+      BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~SKIP_BUF_INIT_FLAG, m_send_buffer);
+      if (rc) {
+        m_send_buffer->IsBusy = TRUE;
+      }
+      return rc;
+    }
+
+    char* recv_buf() const override {
+      return (char*)m_recv_allocator->ptr(m_recv_buf_block);
+    }
+
+    uint32_t recv_buf_size() const override {
+      return m_recv_allocator->block_size();
+    }
+
+    char* send_buf() const override {
+      return (char*)m_send_allocator->ptr(m_send_buf_block);
+    }
+
+    uint32_t send_buf_size() const override {
+      return m_send_allocator->block_size();
+    }
+
+    void set_recv_buf(char* buf) override {}
+    void set_recv_buf_size(uint32_t size) override {}
+    void set_send_buf(const char* buf) override {}
+    void set_send_buf_size(uint32_t size) override {}
+
+    void* sys_data() const override { return m_iocp; }
+    void* user_data() const override { return nullptr; }
+
+    void on_close(close_cb cb) { m_on_close = cb; }
+    void on_error(error_cb cb) { m_on_error = cb; }
+
+  private:
+    std::string m_host_name;
+    std::string m_port;
+
+    ISocketOSSupportLayer* m_owner_socket_layer;
+    StaticBlockAllocator* m_recv_allocator;
+    StaticBlockAllocator* m_send_allocator;
+    close_cb m_on_close;
+    error_cb m_on_error;
+
+    SOCKET m_socket;
+
+    uint32_t m_recv_buf_block;
+    Tag_RIO_BUF* m_recv_buffer;
+
+    uint32_t m_send_buf_block;
+    Tag_RIO_BUF* m_send_buffer;
+
+    RIO_CQ m_completion_queue;
+    RIO_RQ m_request_queue;
+    HANDLE m_iocp;
+    OVERLAPPED m_overlapped;
+
+    ETransportLayerProtocol m_protocol;
+  };
+
+  bool SocketOSSupportLayerFactory::initialize() {
     return true;
   }
 
-  bool TLS_SocketProxy::send(const HTTP_Request* request) {
-    uint32_t request_buf_size = 0;
-    const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
+  bool SocketOSSupportLayerFactory::deinitialize() {
+    if (s_rio) {
+      delete s_rio;
+    }
+    return true;
   }
 
-  bool TLS_SocketProxy::send(const HTTP_Response* response) {
-    uint32_t request_buf_size = 0;
-    const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
-  }
-
-  bool TLS_SocketProxy::send(const RawPacket* packet) {
-    return send(packet->message(), packet->length(), nullptr);
+  ISocketOSSupportLayer* SocketOSSupportLayerFactory::create(netpp::ISocketOSSupportLayer* owner_socket_layer,
+    netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, ESocketHint hint) {
+#ifdef _WIN32
+    switch (hint) {
+    case ESocketHint::E_CLIENT:
+      return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+    case ESocketHint::E_SERVER:
+    default:
+      if (int err = _win32_init_rio(owner_socket_layer->socket()); err != 0) {
+        owner_socket_layer->error(ESocketErrorReason::E_REASON_SOCKET);
+        return nullptr;
+      }
+      return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+    }
+#else
+    switch (hint) {
+    case ESocketHint::E_CLIENT:
+    default:
+      return nullptr;
+    case ESocketHint::E_SERVER:
+      return nullptr;
+    }
+#endif
   }
 
 }  // namespace netpp

@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  server.on_request([](const ISocketPipe* source, const HTTP_Request* request) {
+  server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
     printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
 
     if (request->method() != EHTTP_RequestMethod::E_REQUEST_GET) {
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
     });
 
 
-  server.on_receive([&](const ISocketPipe* source, const RawPacket* packet) {
+  server.on_raw_receive([&](const ISocketPipe* source, const RawPacket* packet) {
     MessagePacket* msg = (MessagePacket*)packet->m_message;
     if (!msg->validate(packet->m_length)) {
       fprintf(stderr, "Invalid message packet received\n");

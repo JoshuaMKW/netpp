@@ -217,7 +217,7 @@ namespace netpp {
       bool send(const HTTP_Request* request) override;
       bool send(const RawPacket* packet) override;
 
-      void on_close(ISocketPipe::close_callback callback) override { m_on_close = callback; }
+      void on_close(ISocketPipe::close_callback callback) override {  }
       void on_dns_request(ISocketPipe::dns_request_callback callback) override { m_on_dns_request = callback; }
       void on_dns_response(ISocketPipe::dns_response_callback callback) override { m_on_dns_response = callback; }
       void on_http_request(ISocketPipe::http_request_callback callback) override { m_on_http_request = callback; }
@@ -228,7 +228,6 @@ namespace netpp {
       void on_sip_request(ISocketPipe::sip_request_callback callback) override { m_on_sip_request = callback; }
       void on_sip_response(ISocketPipe::sip_response_callback callback) override { m_on_sip_response = callback; }
 
-      void signal_close() override;
       const DNS_Response* signal_dns_request(const DNS_Request* request) override;
       const DNS_Request* signal_dns_response(const DNS_Response* response) override;
       const HTTP_Response* signal_http_request(const HTTP_Request* request) override;
@@ -248,7 +247,6 @@ namespace netpp {
       std::string m_host_name;
       std::string m_port;
 
-      ISocketPipe::close_callback m_on_close;
       ISocketPipe::dns_request_callback m_on_dns_request;
       ISocketPipe::dns_response_callback m_on_dns_response;
       ISocketPipe::http_request_callback m_on_http_request;
