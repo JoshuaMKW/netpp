@@ -24,11 +24,7 @@ const char* server_error(EServerError error, int reason);
 
 class IServer {
 public:
-  using receive_callback = std::function<RawPacket* (const ISocketPipe* source, const RawPacket* packet)>;
-  using request_callback = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
-  using response_callback = std::function<void(const ISocketPipe* source, const HTTP_Response* response)>;
-
-  virtual ~IServer() = 0;
+  virtual ~IServer() = default;
 
   virtual bool is_running() const = 0;
 
@@ -124,11 +120,6 @@ protected:
   void emit_error(ISocketPipe* pipe, EServerError error, int reason) override;
 
 protected:
-  friend struct Win32SocketPipe;
-
-  using pipe_request_callback = request_callback;
-  using pipe_receive_callback = receive_callback;
-
   bool is_startup_thread_cur() const;
 
   bool initialize(const char* hostname, const char* port);

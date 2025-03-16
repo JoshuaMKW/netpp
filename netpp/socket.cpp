@@ -1,6 +1,7 @@
 
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <thread>
 
@@ -14,7 +15,6 @@ using namespace std::chrono_literals;
 
 #ifdef _WIN32
 
-#pragma comment(lib, "ws2_32.lib")
 #include <MSWSock.h>
 
 #define RIO_PENDING_MAX 5
@@ -130,10 +130,50 @@ namespace netpp {
     WSABUF* Buffer;
   };
 
+  class Win32ClientSocketIOResult : public ISocketIOResult {
+  public:
+    Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, HANDLE iocp, size_t capacity = 16) : m_pipe(pipe) {
+      DWORD transferred_;
+      ULONG_PTR completion_key;
+      LPOVERLAPPED overlapped;
+
+#ifdef CLIENT_USE_WSA
+      bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
+      if (!success) {
+        return;
+      }
+
+      if (completion_key == (DWORD)ECompletionKey::E_STOP) {
+        return;
+      }
+#endif
+    }
+
+    ~Win32ClientSocketIOResult() override = default;
+
+    bool is_valid() const {
+      return m_pipe != nullptr;
+    }
+
+    bool for_each(each_fn cb) {
+      if (!is_valid()) {
+        return false;
+      }
+
+      return cb(m_pipe, { EPipeOperation::E_RECV, 0 });
+    }
+
+  private:
+    ISocketOSSupportLayer* m_pipe;
+  };
+
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
   public:
     Win32ClientSocketLayer(ISocketOSSupportLayer* owner_socket_layer,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol) {
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
+      : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
+      m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK),
+      m_recv_busy(false), m_send_busy(false) {
       m_socket = INVALID_SOCKET;
       m_recv_buffer = new Tag_WSA_BUF{
         nullptr,
@@ -162,6 +202,7 @@ namespace netpp {
       m_connected = false;
       m_connecting = false;
       m_protocol = protocol;
+      DisconnectEx = nullptr;
     }
 
     ~Win32ClientSocketLayer() override {
@@ -291,6 +332,9 @@ namespace netpp {
       }
 #endif
 
+      m_host_name = hostname;
+      m_port = port;
+
       return open(socket_);
     }
 
@@ -360,6 +404,145 @@ namespace netpp {
       return false;
     }
 
+    bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
+      if (m_protocol == ETransportLayerProtocol::E_UDP) {
+        return false;
+      }
+
+#if CLIENT_USE_WSA
+      // Check if the connection is still alive
+      uint32_t flags = MSG_PEEK;
+      BOOL rc = ::WSARecv(m_socket, m_recv_buffer, 1, NULL, (LPDWORD)&flags, m_recv_overlapped, NULL);
+      if (rc > 0) {
+        return true;
+      }
+      else {
+        int error = ::WSAGetLastError();
+        if (error == WSA_IO_PENDING || error == 0) {
+          return true;
+        }
+      }
+#else
+      char buf[1];
+      int rc = ::recv(m_socket, buf, 1, MSG_PEEK);
+      if (rc > 0) {
+        return true;
+      }
+#endif
+
+      // Connect to the server...
+      sockaddr_in server_addr;
+      ZeroMemory(&server_addr, sizeof(server_addr));
+
+      server_addr.sin_family = AF_INET;
+      server_addr.sin_port = htons(atoi(m_port.c_str()));
+      inet_pton(AF_INET, m_host_name.c_str(), &server_addr.sin_addr);
+
+      std::atomic<bool> time_out = false;
+
+      auto future = std::async(std::launch::async, [&time_out](SOCKET socket, sockaddr* addr, size_t addr_size) {
+#if CLIENT_USE_WSA
+        QOS qos;
+        ZeroMemory(&qos, sizeof(qos));
+
+        bool custom_flowspec = recv_flowspec && send_flowspec;
+        if (recv_flowspec && send_flowspec) {
+          qos.SendingFlowspec.DelayVariation = send_flowspec->m_jitter_tolerance;
+          qos.SendingFlowspec.ServiceType = (int)send_flowspec->m_service_type;
+          qos.SendingFlowspec.TokenRate = send_flowspec->m_token_rate;
+          qos.SendingFlowspec.TokenBucketSize = send_flowspec->m_token_bucket_size;
+          qos.SendingFlowspec.PeakBandwidth = send_flowspec->m_peak_bandwidth;
+          qos.SendingFlowspec.MaxSduSize = send_flowspec->m_max_sdu_size;
+          qos.SendingFlowspec.MinimumPolicedSize = send_flowspec->m_min_policed_size;
+
+          qos.ReceivingFlowspec.DelayVariation = recv_flowspec->m_jitter_tolerance;
+          qos.ReceivingFlowspec.ServiceType = (int)recv_flowspec->m_service_type;
+          qos.ReceivingFlowspec.TokenRate = recv_flowspec->m_token_rate;
+          qos.ReceivingFlowspec.TokenBucketSize = recv_flowspec->m_token_bucket_size;
+          qos.ReceivingFlowspec.PeakBandwidth = recv_flowspec->m_peak_bandwidth;
+          qos.ReceivingFlowspec.MaxSduSize = recv_flowspec->m_max_sdu_size;
+          qos.ReceivingFlowspec.MinimumPolicedSize = recv_flowspec->m_min_policed_size;
+        }
+
+        // TODO: Potentially handle QOS differently here
+        qos.ProviderSpecific.buf = (char*)&qos;
+        qos.ProviderSpecific.len = sizeof(qos);
+#endif
+
+        while (true) {
+#if CLIENT_USE_WSA
+          if (::WSAConnect(server_pipe->socket(), result->ai_addr, (int)result->ai_addrlen, NULL, NULL, custom_flowspec ? &qos : NULL, NULL) == SOCKET_ERROR) {
+            int rc = ::WSAGetLastError();
+            if (rc == WSAEISCONN) {
+              return true;
+            }
+            else {
+              if (rc != WSAEWOULDBLOCK && rc != WSAECONNREFUSED) {
+                client->emit_error(nullptr, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_LISTEN);
+              }
+              // Error connecting to the server (server is down?)
+              if (time_out) {
+                return false;
+              }
+              fprintf(stderr, "[CLIENT: %llu] ERROR: Server connection failed... retrying in 1s\n", socket);
+              std::this_thread::sleep_for(1s);
+              continue;
+            }
+
+            fd_set write_set;
+            FD_ZERO(&write_set);
+            FD_SET(server_pipe->socket(), &write_set);
+
+            // Check for connection completion
+            timeval timeout = { 2, 0 };
+            if (::select(0, NULL, &write_set, NULL, &timeout) <= 0) {
+              if (time_out) {
+                return false;
+              }
+              fprintf(stderr, "[CLIENT: %llu] ERROR: Server connection failed... retrying in 1s\n", socket);
+              std::this_thread::sleep_for(1s);
+              continue;
+            }
+
+            int error = 0;
+            int error_size = sizeof(error);
+            if (::getsockopt(server_pipe->socket(), SOL_SOCKET, SO_ERROR, (char*)&error, &error_size) == 0) {
+              if (time_out) {
+                return false;
+              }
+              fprintf(stderr, "[CLIENT: %llu] ERROR: Server connection failed... retrying in 1s\n", socket);
+              std::this_thread::sleep_for(1s);
+              continue;
+            }
+          }
+#else
+          if (::connect(socket, addr, (int)addr_size) == SOCKET_ERROR) {
+            //client->emit_error(nullptr, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_LISTEN);
+            if (time_out) {
+              return false;
+            }
+            fprintf(stderr, "[CLIENT: %llu] ERROR: Server connection failed... retrying in 1s\n", socket);
+            std::this_thread::sleep_for(1s);
+            continue;
+          }
+#endif
+          return true;
+        }
+        }, m_socket, (sockaddr*)&server_addr, sizeof(server_addr));
+
+      if (timeout > 0 && future.wait_for(milliseconds(timeout)) == std::future_status::timeout) {
+        time_out = true;
+      }
+
+      return future.get();
+    }
+
+    bool ping() override {
+      RawPacket packet{ "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", 8 };
+      uint32_t flags = 0;
+      return send(packet.message(), packet.length(), &flags);
+    }
+
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
       if (m_recv_buffer->IsBusy) {
         return false;
@@ -420,12 +603,33 @@ namespace netpp {
       }
       return true;
 #else
-      int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
-      if (rc == SOCKET_ERROR) {
-        error(ESocketErrorReason::E_REASON_SEND);
-        return false;
+      switch (m_protocol) {
+      case ETransportLayerProtocol::E_TCP: {
+        int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
+        if (rc == SOCKET_ERROR) {
+          error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+        return true;
       }
-      return true;
+      case ETransportLayerProtocol::E_UDP: {
+        // Connect to the server...
+        sockaddr_in server_addr;
+        ZeroMemory(&server_addr, sizeof(server_addr));
+
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(atoi(m_port.c_str()));
+        inet_pton(AF_INET, m_host_name.c_str(), &server_addr.sin_addr);
+
+        int rc = ::sendto(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_, (sockaddr*)&server_addr, sizeof(sockaddr));
+        if (rc == SOCKET_ERROR) {
+          error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+        return true;
+      }
+      }
+      return false;
 #endif
     }
 
@@ -450,6 +654,10 @@ namespace netpp {
     void set_send_buf(const char* buf) override {}
     void set_send_buf_size(uint32_t size) override {}
 
+    ISocketIOResult* wait_results() override {
+      return new Win32ClientSocketIOResult(this, m_iocp, 32);
+    }
+
     void* sys_data() const override { return m_iocp; }
     void* user_data() const override { return nullptr; }
 
@@ -457,6 +665,9 @@ namespace netpp {
     void on_error(error_cb cb) { m_on_error = cb; }
 
   private:
+    std::string m_host_name;
+    std::string m_port;
+
     ISocketOSSupportLayer* m_owner_socket_layer;
     StaticBlockAllocator* m_recv_allocator;
     StaticBlockAllocator* m_send_allocator;
@@ -519,7 +730,11 @@ namespace netpp {
 
       m_results = new RIORESULT[capacity];
       m_result_max = capacity;
-      m_result_count = s_rio->RIODequeueCompletion(rio_cq, m_results, capacity);
+      m_result_count = static_cast<size_t>(s_rio->RIODequeueCompletion(rio_cq, m_results, (ULONG)capacity));
+    }
+
+    ~Win32ServerSocketIOResult() override {
+      delete[] m_results;
     }
 
     bool is_valid() const {
@@ -549,7 +764,7 @@ namespace netpp {
     }
 
   private:
-    RIORESULT *m_results;
+    RIORESULT* m_results;
     size_t m_result_max;
     size_t m_result_count;
   };
@@ -557,7 +772,9 @@ namespace netpp {
   class Win32ServerSocketLayer : public ISocketOSSupportLayer {
   public:
     Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol) {
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
+      : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
+      m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
       m_socket = INVALID_SOCKET;
       m_recv_buffer = new Tag_RIO_BUF{
         RIO_BUFFERID{ RIO_INVALID_BUFFERID },
@@ -632,11 +849,6 @@ namespace netpp {
     bool open(const char* hostname, const char* port) override {
       Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
 
-      sockaddr_in addr;
-      addr.sin_family = AF_INET;
-      addr.sin_port = htons(atoi(port));
-      inet_pton(AF_INET, hostname, &addr.sin_addr);
-
       uint64_t socket_ = 0;
 
       switch (m_protocol) {
@@ -656,19 +868,24 @@ namespace netpp {
       }
       }
 
+      m_host_name = hostname;
+      m_port = port;
+
       return open(socket_);
     }
 
     bool open(uint64_t socket_) override {
       Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
 
-      int namelen = sizeof(sockaddr_in);
-      sockaddr_in addr;
-
-      int rc = getpeername(socket_, (sockaddr*)&addr, &namelen);
-      if (rc == SOCKET_ERROR) {
+      if (!SocketOSSupportLayerFactory::initialize(socket_)) {
         return false;
       }
+
+      int namelen = sizeof(sockaddr_in);
+      sockaddr_in addr;
+      addr.sin_family = AF_INET;
+      addr.sin_port = htons(atoi(m_port.c_str()));
+      inet_pton(AF_INET, m_host_name.c_str(), &addr.sin_addr);
 
       ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
 
@@ -861,6 +1078,16 @@ namespace netpp {
       return true;
     }
 
+    bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
+      return false;
+    }
+
+    bool ping() override {
+      RawPacket packet{ "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", 8 };
+      uint32_t flags = 0;
+      return send(packet.message(), packet.length(), &flags);
+    }
+
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
       if (m_recv_buffer->IsBusy) {
         return FALSE;
@@ -917,7 +1144,7 @@ namespace netpp {
     void set_send_buf(const char* buf) override {}
     void set_send_buf_size(uint32_t size) override {}
 
-    ISocketIOResult *wait_results() override {
+    ISocketIOResult* wait_results() override {
       return new Win32ServerSocketIOResult(m_iocp, m_completion_queue, 32);
     }
 
@@ -953,8 +1180,8 @@ namespace netpp {
     ETransportLayerProtocol m_protocol;
   };
 
-  bool SocketOSSupportLayerFactory::initialize() {
-    return true;
+  bool SocketOSSupportLayerFactory::initialize(uint64_t socket) {
+    return _win32_init_rio(socket) == 0;
   }
 
   bool SocketOSSupportLayerFactory::deinitialize() {
@@ -972,10 +1199,6 @@ namespace netpp {
       return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
     case ESocketHint::E_SERVER:
     default:
-      if (int err = _win32_init_rio(owner_socket_layer->socket()); err != 0) {
-        owner_socket_layer->error(ESocketErrorReason::E_REASON_SOCKET);
-        return nullptr;
-      }
       return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
     }
 #else

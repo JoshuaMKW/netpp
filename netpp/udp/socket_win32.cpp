@@ -15,7 +15,9 @@ using namespace std::chrono_literals;
 namespace netpp {
 
   UDP_Socket::UDP_Socket(ISocketOSSupportLayer* owner_socket_layer,
-    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint) : m_hint(hint) {
+    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint)
+    : m_hint(hint), m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK),
+      m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
     m_socket_layer = SocketOSSupportLayerFactory::create(
       owner_socket_layer,
       recv_allocator, send_allocator,
@@ -29,6 +31,10 @@ namespace netpp {
 
   void UDP_Socket::close() {
     m_socket_layer->close();
+  }
+
+  bool UDP_Socket::ping() {
+    return m_socket_layer->ping();
   }
 
   bool UDP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
@@ -53,7 +59,7 @@ namespace netpp {
 
   void UDP_Socket::clone_callbacks_from(ISocketPipe* other) {
     UDP_Socket* udp = static_cast<UDP_Socket*>(other);
-    m_signal_close = udp->m_signal_close;
+    //m_signal_close = udp->m_signal_close;
     m_signal_dns_request = udp->m_signal_dns_request;
     m_signal_dns_response = udp->m_signal_dns_response;
     m_signal_http_request = udp->m_signal_http_request;

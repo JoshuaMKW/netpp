@@ -102,7 +102,7 @@ namespace netpp {
 
     using each_fn = std::function<bool(ISocketOSSupportLayer* pipe, const OperationData& info)>;
 
-    virtual ~ISocketIOResult() = 0;
+    virtual ~ISocketIOResult() = default;
 
     virtual bool is_valid() const = 0;
     virtual bool for_each(each_fn cb) = 0;
@@ -113,7 +113,7 @@ namespace netpp {
     using close_cb = std::function<bool(ISocketOSSupportLayer*)>;
     using error_cb = std::function<bool(ISocketOSSupportLayer*, ESocketErrorReason reason)>;
 
-    virtual ~ISocketOSSupportLayer() = 0;
+    virtual ~ISocketOSSupportLayer() = default;
 
     virtual uint64_t socket() const = 0;
     virtual ETransportLayerProtocol protocol() const = 0;
@@ -132,6 +132,10 @@ namespace netpp {
     virtual bool sync(uint64_t wait_time = 0) = 0;
 
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
+    virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
+
+    // Blocking call to check for alive connection
+    virtual bool ping() = 0;
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
     // Application surrenders ownership of the buffer
@@ -162,7 +166,7 @@ namespace netpp {
 
   class SocketOSSupportLayerFactory {
   public:
-    static bool initialize();
+    static bool initialize(uint64_t socket);
     static ISocketOSSupportLayer* create(netpp::ISocketOSSupportLayer* owner_socker_layer,
       netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator,
       ETransportLayerProtocol protocol, ESocketHint hint);
@@ -206,7 +210,10 @@ namespace netpp {
     virtual bool sync(uint64_t wait_time = 0) = 0;
 
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
+    virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
+    // Blocking call to check for alive connection
+    virtual bool ping() = 0;
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
     // Application surrenders ownership of the buffer
@@ -248,6 +255,10 @@ namespace netpp {
     virtual void* user_data() const = 0;
 
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
+
+    static inline bool is_ping_packet(const char* buf, size_t size) {
+      return *(uint64_t*)buf == *(uint64_t*)"\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF";
+    }
   };
 
   /// <summary>
@@ -281,6 +292,12 @@ namespace netpp {
       return m_socket_layer->bind_and_listen(addr, backlog);
     }
 
+    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override {
+      return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
+    }
+
+    // Blocking call to check for alive connection
+    bool ping() override;
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
     // Application surrenders ownership of the buffer
@@ -346,15 +363,12 @@ namespace netpp {
     sip_request_callback m_signal_sip_request;
     sip_response_callback m_signal_sip_response;
 
-    SOCKET m_socket;
     std::mutex m_mutex;
 
     uint32_t m_recv_buf_block;
     uint32_t m_send_buf_block;
 
     ESocketHint m_hint = ESocketHint::E_NONE;
-
-    IServer* m_server;
     ISocketOSSupportLayer* m_socket_layer;
   };
 
@@ -383,6 +397,16 @@ namespace netpp {
 
     bool sync(uint64_t wait_time = 0) override { return m_socket_layer->sync(); }
 
+    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
+      return m_socket_layer->bind_and_listen(addr, backlog);
+    }
+
+    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override {
+      return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
+    }
+
+    // Blocking call to check for alive connection
+    bool ping() override;
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
     // Application surrenders ownership of the buffer
@@ -448,15 +472,12 @@ namespace netpp {
     sip_request_callback m_signal_sip_request;
     sip_response_callback m_signal_sip_response;
 
-    SOCKET m_socket;
     std::mutex m_mutex;
 
     uint32_t m_recv_buf_block;
     uint32_t m_send_buf_block;
 
     ESocketHint m_hint = ESocketHint::E_NONE;
-
-    IServer* m_server;
     ISocketOSSupportLayer* m_socket_layer;
   };
 

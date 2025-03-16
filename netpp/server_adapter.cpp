@@ -4,10 +4,11 @@
 
 #define CLIENT_USE_WSA 0
 
-#pragma comment(lib, "ws2_32.lib")
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mswsockdef.h>
+
+#if 0
 
 namespace netpp {
 
@@ -140,5 +141,7 @@ namespace netpp {
   }
 
 }  // namespace netpp
+
+#endif
 
 #endif

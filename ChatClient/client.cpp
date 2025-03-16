@@ -6,7 +6,8 @@
 
 #pragma comment(lib, "netpp.lib")
 
-#define SERVER_IPV4 "47.222.169.75"
+//#define SERVER_IPV4 "47.222.169.75"
+#define SERVER_IPV4 network_ipv4()
 #define SERVER_PORT "8080"
 
 using namespace netpp;
@@ -82,7 +83,7 @@ int main(int argc, char** argv) {
   bool history_received = false;
   bool history_failed = false;
 
-  client.on_response([&](const ISocketPipe* source, const HTTP_Response* response) {
+  client.on_http_response([&](const ISocketPipe* source, const HTTP_Response* response) {
     if (response->status_code() != EHTTP_ResponseStatusCode::E_STATUS_OK) {
       fprintf(stderr, "Failed to get history from server\n");
       history_failed = true;
@@ -95,32 +96,11 @@ int main(int argc, char** argv) {
     return nullptr;
     });
 
-#if REQUEST_IP_AND_PORT
-  client.on_receive([&client_name](const ISocketPipe* source, const RawPacket* packet) {
+  client.on_raw_receive([&](const ISocketPipe* source, const RawPacket* packet) {
     MessagePacket* msg = (MessagePacket*)packet->m_message;
     if (!msg->validate(packet->m_length)) {
       return nullptr;
     }
-
-    if (client_name == msg->get_client_name()) {
-      return nullptr;
-    }
-
-    printf("Client (%s): %s\n", msg->get_client_name(), msg->get_message());
-    return nullptr;
-    });
-#else
-  client.on_receive([&](const ISocketPipe* source, const RawPacket* packet) {
-    MessagePacket* msg = (MessagePacket*)packet->m_message;
-    if (!msg->validate(packet->m_length)) {
-      return nullptr;
-    }
-
-#if 0
-    if (client_name == msg->get_client_name()) {
-      return nullptr;
-    }
-#endif
 
     // Clear line on the console
     if (sent_message) {
@@ -150,7 +130,6 @@ int main(int argc, char** argv) {
 
     return nullptr;
     });
-#endif
 
   if (!client.start()) {
     fprintf(stderr, "Failed to start the client\n");

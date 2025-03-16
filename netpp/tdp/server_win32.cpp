@@ -77,9 +77,8 @@ namespace netpp {
     }
 
     m_startup_thread = std::this_thread::get_id();
-    m_server_socket.m_pipe = nullptr;
+    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
     m_server_socket.m_state = { 0, 0 };
-    m_stop_flag = false;
   }
 
   TCP_Server::~TCP_Server() {
@@ -112,7 +111,7 @@ namespace netpp {
   }
 
   bool TCP_Server::is_running() const {
-    return m_server_socket.m_pipe && m_server_socket.m_pipe->socket() != INVALID_SOCKET && !m_stop_flag;
+    return m_iocp_thread.joinable() && !m_stop_flag;
   }
 
   bool TCP_Server::start(const char* hostname, const char* port) {
@@ -137,7 +136,7 @@ namespace netpp {
   bool TCP_Server::send_all(const HTTP_Request* request) {
     bool result = true;
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, request](auto& kv) {
-      if (!kv.second->send(request)) {
+      if (!kv.second.m_pipe->send(request)) {
         result = false;
       }
       });
@@ -147,7 +146,7 @@ namespace netpp {
   bool TCP_Server::send_all(const HTTP_Response* response) {
     bool result = true;
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, response](auto& kv) {
-      if (!kv.second->send(response)) {
+      if (!kv.second.m_pipe->send(response)) {
         result = false;
       }
       });
@@ -157,7 +156,7 @@ namespace netpp {
   bool TCP_Server::send_all(const RawPacket* packet) {
     bool result = true;
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, packet](auto& kv) {
-      if (!kv.second->send(packet)) {
+      if (!kv.second.m_pipe->send(packet)) {
         result = false;
       }
       });
@@ -236,8 +235,6 @@ namespace netpp {
       return false;
     }
 
-    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
-
     m_server_socket.m_pipe->on_close([this](ISocketPipe* pipe) {
       m_purgatory_sockets.push(pipe->socket());
       return false;
@@ -295,6 +292,8 @@ namespace netpp {
     }
 
     m_client_sockets.clear();
+
+    SocketOSSupportLayerFactory::deinitialize();
   }
 
   ISocketPipe* TCP_Server::get_socket_pipe(uint64_t socket) {
@@ -312,7 +311,7 @@ namespace netpp {
     char* recv_buf = pipe->recv_buf();
     uint32_t recv_buf_offset = 0;
     uint32_t content_length = 0;
-    
+
     IApplicationLayerAdapter* adapter = nullptr;
 
     do {
@@ -440,10 +439,12 @@ namespace netpp {
     //       If so, what does that look like?
     while (server->is_running()) {
       ISocketIOResult* sock_results = server->m_server_socket.m_pipe->wait_results();
-      if (!sock_results || sock_results->is_valid()) {
+      if (!sock_results || !sock_results->is_valid()) {
         server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
         goto exit_thread;
       }
+
+      std::unique_lock<std::mutex> lock(server->m_mutex);
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
         SocketData& sock_data = server->m_client_sockets[pipe->socket()];
@@ -487,6 +488,7 @@ namespace netpp {
           break;
         }
         }
+        return true;
         });  // End of completion for loop
     }  // End of while loop
 

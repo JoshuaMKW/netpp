@@ -15,7 +15,8 @@ using namespace std::chrono_literals;
 namespace netpp {
 
   TCP_Socket::TCP_Socket(ISocketOSSupportLayer * owner_socket_layer,
-    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint) : m_hint(hint) {
+    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint)
+    : m_hint(hint), m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
     m_socket_layer = SocketOSSupportLayerFactory::create(
       owner_socket_layer,
       recv_allocator, send_allocator,
@@ -48,8 +49,12 @@ namespace netpp {
 
   void TCP_Socket::close() {
     m_socket_layer->close();
-    m_host_name = nullptr;
-    m_port = nullptr;
+    m_host_name = "";
+    m_port = "";
+  }
+
+  bool TCP_Socket::ping() {
+    return m_socket_layer->ping();
   }
 
   bool TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {

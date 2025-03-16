@@ -48,6 +48,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  if (server.start(SERVER_IPV4, SERVER_PORT)) {
+    printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
+  }
+  else {
+    fprintf(stderr, "Failed to start the server\n");
+    return 1;
+  }
+
   server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
     printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
 
@@ -107,14 +115,6 @@ int main(int argc, char** argv) {
     server.send_all(packet);
     return nullptr;
     });
-
-  if (server.start(SERVER_IPV4, SERVER_PORT)) {
-    printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  }
-  else {
-    fprintf(stderr, "Failed to start the server\n");
-    return 1;
-  }
 
   while (server.is_running()) { std::this_thread::sleep_for(std::chrono::seconds(1)); }
 
