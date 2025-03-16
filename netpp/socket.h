@@ -91,6 +91,23 @@ namespace netpp {
   class SIP_Request;
   class SIP_Response;
 
+  class ISocketOSSupportLayer;
+
+  class ISocketIOResult {
+  public:
+    struct OperationData {
+      EPipeOperation m_operation;
+      uint32_t m_bytes_transferred;
+    };
+
+    using each_fn = std::function<bool(ISocketOSSupportLayer* pipe, const OperationData& info)>;
+
+    virtual ~ISocketIOResult() = 0;
+
+    virtual bool is_valid() const = 0;
+    virtual bool for_each(each_fn cb) = 0;
+  };
+
   class ISocketOSSupportLayer {
   public:
     using close_cb = std::function<bool(ISocketOSSupportLayer*)>;
@@ -131,6 +148,8 @@ namespace netpp {
     virtual void set_recv_buf_size(uint32_t size) = 0;
     virtual void set_send_buf(const char* buf) = 0;
     virtual void set_send_buf_size(uint32_t size) = 0;
+
+    virtual ISocketIOResult *wait_results() = 0;
 
     virtual void* sys_data() const = 0;
     virtual void* user_data() const = 0;
@@ -223,6 +242,8 @@ namespace netpp {
     virtual const SIP_Response* signal_sip_request(const SIP_Request* request) = 0;
     virtual const SIP_Request* signal_sip_response(const SIP_Response* response) = 0;
 
+    virtual ISocketIOResult* wait_results() = 0;
+
     virtual void* sys_data() const = 0;
     virtual void* user_data() const = 0;
 
@@ -303,6 +324,8 @@ namespace netpp {
     void signal_rtcp_packet(const RTCP_Packet* packet) override { m_signal_rtcp_packet(this, packet); }
     const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_signal_sip_request(this, request); }
     const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_signal_sip_response(this, response); }
+
+    ISocketIOResult* wait_results() override { return m_socket_layer->wait_results(); }
 
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
@@ -403,6 +426,8 @@ namespace netpp {
     void signal_rtcp_packet(const RTCP_Packet* packet) override { m_signal_rtcp_packet(this, packet); }
     const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_signal_sip_request(this, request); }
     const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_signal_sip_response(this, response); }
+
+    ISocketIOResult* wait_results() override { return m_socket_layer->wait_results(); }
 
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }

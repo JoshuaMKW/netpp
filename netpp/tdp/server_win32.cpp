@@ -305,6 +305,58 @@ namespace netpp {
     m_purgatory_sockets.push(pipe->socket());
   }
 
+  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+    bool is_message_complete = false;
+    uint32_t message_size = 0;  // 0 == unknown size
+
+    char* recv_buf = pipe->recv_buf();
+    uint32_t recv_buf_offset = 0;
+    uint32_t content_length = 0;
+    
+    IApplicationLayerAdapter* adapter = nullptr;
+
+    do {
+      uint32_t flags = 0;
+      uint32_t transferred = 0;
+      bool recv_result = pipe->recv(recv_buf_offset, &flags, &transferred);
+      if (!recv_result) {
+        continue;
+      }
+
+      const char* http_header_begin = HTTP_Response::header_begin(recv_buf, transferred);
+      if (!http_header_begin) {
+        // Not HTTP, treat as raw packet
+
+        // If the message size is not known, read the first 4 bytes
+        if (recv_buf_offset == 0) {
+          message_size = *(uint32_t*)recv_buf;
+        }
+
+        // Advance the buffer offset
+        recv_buf_offset += transferred;
+        is_message_complete = recv_buf_offset >= message_size;
+      }
+      else {
+        // HTTP, treat as HTTP request
+        recv_buf_offset += transferred;
+
+        if (content_length == 0) {
+          if (const char* h_end = HTTP_Response::header_end(recv_buf, recv_buf_offset)) {
+            content_length = HTTP_Response::content_length(recv_buf, recv_buf_offset);
+            message_size =
+              ((uint32_t)(h_end - recv_buf) + 4) + content_length;
+          }
+        }
+
+        is_message_complete = message_size > 0 && recv_buf_offset >= message_size;
+
+        adapter = ApplicationAdapterFactory::detect(recv_buf, info.m_bytes_transferred);
+      }
+    } while (!is_message_complete);
+
+    return adapter;
+  }
+
   void TCP_Server::integrate_pending_sockets() {
     while (!m_awaiting_sockets.empty()) {
       uint64_t socket = m_awaiting_sockets.front();
@@ -383,105 +435,59 @@ namespace netpp {
     TCP_Server* server = (TCP_Server*)param;
     ISocketPipe* server_pipe = server->m_server_socket.m_pipe;
 
-    DWORD transferred_;
-    ULONG_PTR completion_key;
-    LPOVERLAPPED overlapped;
-
     // TODO: Figure out why the completion status never returns
     //       Establish defined structure (should multiple sockets be handled per iocp thread?)
     //       If so, what does that look like?
     while (server->is_running()) {
-      bool success = GetQueuedCompletionStatus((HANDLE)server->m_server_socket.m_pipe->sys_data(), &transferred_, &completion_key, &overlapped, INFINITE);
-      if (!success) {
-        if (server->m_server_socket.m_pipe->socket() == INVALID_SOCKET) {
-          goto exit_thread;
-        }
+      ISocketIOResult* sock_results = server->m_server_socket.m_pipe->wait_results();
+      if (!sock_results || sock_results->is_valid()) {
         server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
         goto exit_thread;
       }
 
-      if (completion_key == (DWORD)ECompletionKey::E_STOP) {
-        goto exit_thread;
-      }
+      sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+        SocketData& sock_data = server->m_client_sockets[pipe->socket()];
+        pipe->set_busy(info.m_operation, false);
 
-      {
-        RIORESULT results[16];
-        ULONG count = socket_io.rio.RIODequeueCompletion(server->m_server_socket.m_pipe->m_completion_queue, results, 16);
-        if (count == RIO_CORRUPT_CQ) {
-          server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
-          goto exit_thread;
+        switch (info.m_operation) {
+        case EPipeOperation::E_RECV: {
+          IApplicationLayerAdapter* adapter = server->handle_inproc_recv(pipe, info);
+          if (!adapter) {
+            server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+            return false;
+          }
+
+          if (!adapter->on_receive(sock_data.m_pipe, pipe->recv_buf(), info.m_bytes_transferred, 0)) {
+            server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+            return false;
+          }
+          break;
         }
+        case EPipeOperation::E_SEND: {
+          // Check if the send is incomplete (chunking the data)
+          sock_data.m_state.m_bytes_sent += info.m_bytes_transferred;
 
-        for (ULONG i = 0; i < count; i++) {
-          RIORESULT* result = &results[i];
-
-          Tag_RIO_BUF* buf = (Tag_RIO_BUF*)result->RequestContext;
-          ISocketOSSupportLayer* pipe = buf->Pipe;
-
-          SocketData& sock_data = server->m_client_sockets[pipe->socket()];
-
-          if (result->Status != NO_ERROR) {
-            if (buf->Operation == EPipeOperation::E_RECV) {
-              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_RECV);
-            }
-            else {
-              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_SEND);
-            }
-            continue;
+          const int32_t bytes_left = sock_data.m_state.m_bytes_total - sock_data.m_state.m_bytes_sent;
+          if (bytes_left > 0) {
+            // Send the remaining data
+            pipe->send(sock_data.m_state.m_bytes_buf + sock_data.m_state.m_bytes_sent, bytes_left, nullptr);
           }
+          else {
+            // Send is complete
+            sock_data.m_state.m_bytes_sent = 0;
+            sock_data.m_state.m_bytes_total = 0;
 
-          buf->IsBusy = false;
-
-          switch (buf->Operation) {
-          case EPipeOperation::E_RECV: {
-
-            // Get the transfered data if received
-            if (result->BytesTransferred == 0) {
-              continue;
-            }
-
-            bool request_handled = false;
-
-            char* recv_buf = pipe->recv_buf();
-
-            IApplicationLayerAdapter* adapter = ApplicationAdapterFactory::detect(recv_buf, result->BytesTransferred);
-            if (!adapter) {
-              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-              continue;
-            }
-
-            if (!adapter->on_receive(sock_data.m_pipe, recv_buf, result->BytesTransferred, 0)) {
-              server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
-              continue;
-            }
-            break;
+            delete[] sock_data.m_state.m_bytes_buf;
+            sock_data.m_state.m_bytes_buf = nullptr;
           }
-          case EPipeOperation::E_SEND: {
-            // Check if the send is incomplete (chunking the data)
-            sock_data.m_state.m_bytes_sent += result->BytesTransferred;
-
-            const int32_t bytes_left = sock_data.m_state.m_bytes_total - sock_data.m_state.m_bytes_sent;
-            if (bytes_left > 0) {
-              // Send the remaining data
-              pipe->send(sock_data.m_state.m_bytes_buf + sock_data.m_state.m_bytes_sent, bytes_left, nullptr);
-            }
-            else {
-              // Send is complete
-              sock_data.m_state.m_bytes_sent = 0;
-              sock_data.m_state.m_bytes_total = 0;
-
-              delete[] sock_data.m_state.m_bytes_buf;
-              sock_data.m_state.m_bytes_buf = nullptr;
-            }
-            break;
-          }
-          case EPipeOperation::E_CLOSE: {
-            pipe->close();
-            break;
-          }
-          }
-        }  // End of completion for loop
-      }  // End of lock
+          break;
+        }
+        case EPipeOperation::E_CLOSE: {
+          pipe->close();
+          break;
+        }
+        }
+        });  // End of completion for loop
     }  // End of while loop
 
   exit_thread:

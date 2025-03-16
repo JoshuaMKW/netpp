@@ -500,6 +500,60 @@ namespace netpp {
     BOOL IsBusy;
   };
 
+  class Win32ServerSocketIOResult : public ISocketIOResult {
+  public:
+    Win32ServerSocketIOResult(HANDLE iocp, RIO_CQ& rio_cq, size_t capacity = 16)
+      : m_result_count(RIO_CORRUPT_CQ), m_result_max(0), m_results(nullptr) {
+      DWORD transferred_;
+      ULONG_PTR completion_key;
+      LPOVERLAPPED overlapped;
+
+      bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
+      if (!success) {
+        return;
+      }
+
+      if (completion_key == (DWORD)ECompletionKey::E_STOP) {
+        return;
+      }
+
+      m_results = new RIORESULT[capacity];
+      m_result_max = capacity;
+      m_result_count = s_rio->RIODequeueCompletion(rio_cq, m_results, capacity);
+    }
+
+    bool is_valid() const {
+      return m_result_count != RIO_CORRUPT_CQ && m_result_count <= m_result_max;
+    }
+
+    bool for_each(each_fn cb) {
+      if (!is_valid()) {
+        return false;
+      }
+
+      for (size_t i = 0; i < m_result_count; ++i) {
+        RIORESULT& result = m_results[i];
+        if (result.Status != NO_ERROR) {
+          return false;
+        }
+
+        Tag_RIO_BUF* buf = (Tag_RIO_BUF*)result.RequestContext;
+        ISocketOSSupportLayer* pipe = buf->Pipe;
+
+        if (!cb(pipe, { buf->Operation, result.BytesTransferred })) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+  private:
+    RIORESULT *m_results;
+    size_t m_result_max;
+    size_t m_result_count;
+  };
+
   class Win32ServerSocketLayer : public ISocketOSSupportLayer {
   public:
     Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
@@ -862,6 +916,10 @@ namespace netpp {
     void set_recv_buf_size(uint32_t size) override {}
     void set_send_buf(const char* buf) override {}
     void set_send_buf_size(uint32_t size) override {}
+
+    ISocketIOResult *wait_results() override {
+      return new Win32ServerSocketIOResult(m_iocp, m_completion_queue, 32);
+    }
 
     void* sys_data() const override { return m_iocp; }
     void* user_data() const override { return nullptr; }

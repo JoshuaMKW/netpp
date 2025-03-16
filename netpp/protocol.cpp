@@ -100,11 +100,14 @@ namespace netpp {
   }
 
   IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size) {
+    EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_RAW;
+    // Check here for HTTPS
+
     if (HTTP_Request::is_http_request(data, size) || HTTP_Response::is_http_response(data, size)) {
-      return new HTTP_ApplicationAdapter();
+      protocol = EApplicationLayerProtocol::E_HTTP;
     }
 
-    return new RAW_ApplicationAdapter();
+    return create(protocol);
   }
 
 }  // namespace netpp

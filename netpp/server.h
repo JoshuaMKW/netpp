@@ -137,6 +137,8 @@ protected:
   ISocketPipe* get_socket_pipe(uint64_t socket);
   void close_socket(ISocketPipe* pipe);
 
+  IApplicationLayerAdapter* handle_inproc_recv(ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info);
+
 #ifdef _WIN32
   static uint64_t server_iocp_thread_win32(void* param);
 #endif
