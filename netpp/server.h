@@ -42,16 +42,16 @@ public:
   virtual int reason() const = 0;
 
   // Set these before starting the server
-  virtual void on_close(ISocketPipe::close_callback cb) = 0;
-  virtual void on_dns_request(ISocketPipe::dns_request_callback cb) = 0;
-  virtual void on_dns_response(ISocketPipe::dns_response_callback cb) = 0;
-  virtual void on_http_request(ISocketPipe::http_request_callback cb) = 0;
-  virtual void on_http_response(ISocketPipe::http_response_callback cb) = 0;
-  virtual void on_raw_receive(ISocketPipe::raw_receive_callback cb) = 0;
-  virtual void on_rtp_packet(ISocketPipe::rtp_packet_callback cb) = 0;
-  virtual void on_rtcp_packet(ISocketPipe::rtcp_packet_callback cb) = 0;
-  virtual void on_sip_request(ISocketPipe::sip_request_callback cb) = 0;
-  virtual void on_sip_response(ISocketPipe::sip_response_callback cb) = 0;
+  virtual void on_close(ISocketPipe::close_cb cb) = 0;
+  virtual void on_dns_request(ISocketPipe::dns_request_cb cb) = 0;
+  virtual void on_dns_response(ISocketPipe::dns_response_cb cb) = 0;
+  virtual void on_http_request(ISocketPipe::http_request_cb cb) = 0;
+  virtual void on_http_response(ISocketPipe::http_response_cb cb) = 0;
+  virtual void on_raw_receive(ISocketPipe::raw_receive_cb cb) = 0;
+  virtual void on_rtp_packet(ISocketPipe::rtp_packet_cb cb) = 0;
+  virtual void on_rtcp_packet(ISocketPipe::rtcp_packet_cb cb) = 0;
+  virtual void on_sip_request(ISocketPipe::sip_request_cb cb) = 0;
+  virtual void on_sip_response(ISocketPipe::sip_response_cb cb) = 0;
 
   virtual bool send_all(const HTTP_Request*) = 0;
   virtual bool send_all(const HTTP_Response*) = 0;
@@ -95,16 +95,16 @@ public:
   int reason() const override { return m_reason; }
 
   // Set these before starting the server
-  void on_close(ISocketPipe::close_callback cb) override { m_server_socket.m_pipe->on_close(cb); }
-  void on_dns_request(ISocketPipe::dns_request_callback cb) override { m_server_socket.m_pipe->on_dns_request(cb); }
-  void on_dns_response(ISocketPipe::dns_response_callback cb) override { m_server_socket.m_pipe->on_dns_response(cb); }
-  void on_http_request(ISocketPipe::http_request_callback cb) override { m_server_socket.m_pipe->on_http_request(cb); }
-  void on_http_response(ISocketPipe::http_response_callback cb) override { m_server_socket.m_pipe->on_http_response(cb); }
-  void on_raw_receive(ISocketPipe::raw_receive_callback cb) override { m_server_socket.m_pipe->on_raw_receive(cb); }
-  void on_rtp_packet(ISocketPipe::rtp_packet_callback cb) override { m_server_socket.m_pipe->on_rtp_packet(cb); }
-  void on_rtcp_packet(ISocketPipe::rtcp_packet_callback cb) override { m_server_socket.m_pipe->on_rtcp_packet(cb); }
-  void on_sip_request(ISocketPipe::sip_request_callback cb) override { m_server_socket.m_pipe->on_sip_request(cb); }
-  void on_sip_response(ISocketPipe::sip_response_callback cb) override { m_server_socket.m_pipe->on_sip_response(cb); }
+  void on_close(ISocketPipe::close_cb cb) override { m_server_socket.m_pipe->on_close(cb); }
+  void on_dns_request(ISocketPipe::dns_request_cb cb) override { m_server_socket.m_pipe->on_dns_request(cb); }
+  void on_dns_response(ISocketPipe::dns_response_cb cb) override { m_server_socket.m_pipe->on_dns_response(cb); }
+  void on_http_request(ISocketPipe::http_request_cb cb) override { m_server_socket.m_pipe->on_http_request(cb); }
+  void on_http_response(ISocketPipe::http_response_cb cb) override { m_server_socket.m_pipe->on_http_response(cb); }
+  void on_raw_receive(ISocketPipe::raw_receive_cb cb) override { m_server_socket.m_pipe->on_raw_receive(cb); }
+  void on_rtp_packet(ISocketPipe::rtp_packet_cb cb) override { m_server_socket.m_pipe->on_rtp_packet(cb); }
+  void on_rtcp_packet(ISocketPipe::rtcp_packet_cb cb) override { m_server_socket.m_pipe->on_rtcp_packet(cb); }
+  void on_sip_request(ISocketPipe::sip_request_cb cb) override { m_server_socket.m_pipe->on_sip_request(cb); }
+  void on_sip_response(ISocketPipe::sip_response_cb cb) override { m_server_socket.m_pipe->on_sip_response(cb); }
 
   bool send_all(const HTTP_Request*) override;
   bool send_all(const HTTP_Response*) override;

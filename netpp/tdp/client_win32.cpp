@@ -27,11 +27,11 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(uint32_t bufsize) {
+  TCP_Client::TCP_Client(uint32_t desired_bufsize) {
     m_error = EClientError::E_NONE;
     m_reason = -1;
 
-    uint32_t desired_size = bufsize;
+    constexpr uint32_t bufcount = 2;
 
     uint32_t granularity = 0;
 
@@ -44,6 +44,11 @@ namespace netpp {
     granularity = sysconf(_SC_PAGESIZE);
 #endif
 
+    if (desired_bufsize == 0) {
+      desired_bufsize = granularity;
+    }
+
+    uint32_t desired_size = desired_bufsize * bufcount;
     desired_size = RoundUp(desired_size, granularity);
 
 #ifdef _WIN32
@@ -58,11 +63,10 @@ namespace netpp {
     m_sendbuflen = bufsize;
 #endif
 
-    m_startup_thread = std::this_thread::get_id();
+    m_recv_allocator.initialize(m_recvbuf, desired_bufsize, bufcount);
+    m_send_allocator.initialize(m_sendbuf, desired_bufsize, bufcount);
 
-    m_receive_callback = nullptr;
-    m_request_callback = nullptr;
-    m_response_callback = nullptr;
+    m_startup_thread = std::this_thread::get_id();
 
     m_server_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
 
@@ -319,6 +323,11 @@ namespace netpp {
     IApplicationLayerAdapter* adapter = nullptr;
 
     do {
+      if (!pipe->is_ready(EPipeOperation::E_RECV)) {
+        std::this_thread::sleep_for(100ms);
+        continue;
+      }
+
       uint32_t flags = 0;
       uint32_t transferred = 0;
       bool recv_result = pipe->recv(recv_buf_offset, &flags, &transferred);

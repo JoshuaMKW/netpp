@@ -394,20 +394,11 @@ namespace netpp {
     ZeroMemory(&from, sizeof(from));
 
     while (server->is_running()) {
-      SOCKET client_socket = ::WSAAccept(server->m_server_socket.m_pipe->socket(), (sockaddr*)&from, NULL, NULL, 0);
-      if (client_socket == INVALID_SOCKET) {
-        // Server is shutting down
-        return 0;
-      }
-
-      std::unique_lock<std::mutex> lock(server->m_mutex);
-
-      if (client_socket == INVALID_SOCKET) {
-        server->emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_ACCEPT);
-      }
-      else {
-        server->m_awaiting_sockets.push(client_socket);
-      }
+      bool success = server->m_server_socket.m_pipe->accept(nullptr, [server](uint64_t socket) {
+        std::unique_lock<std::mutex> lock(server->m_mutex);
+        server->m_awaiting_sockets.push(socket);
+        return true;
+        });
     }
 
     return 0;

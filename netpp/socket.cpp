@@ -24,6 +24,103 @@ using namespace std::chrono_literals;
 
 #define CLIENT_USE_WSA false
 
+struct _WrapperState {
+  netpp::ISocketOSSupportLayer* m_pipe;
+  netpp::ISocketOSSupportLayer::accept_cond_cb m_cond;
+};
+
+static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
+  LPQOS sqos, LPQOS gqos, LPWSABUF callee_id,
+  LPWSABUF callee_data, GROUP FAR* g, DWORD_PTR callback_data) {
+  _WrapperState *state = reinterpret_cast<_WrapperState*>(callback_data);
+
+  if (state->m_cond == nullptr) {
+    return CF_ACCEPT;
+  }
+
+  netpp::EInternetLayerProtocol protocol = netpp::EInternetLayerProtocol::E_NONE;
+  std::string client_ip, client_port;
+  netpp::NetworkFlowSpec client_recv = {}, client_send = {};
+  netpp::RawPacket request_in = { nullptr, 0 };
+  netpp::RawPacket response_out = { nullptr, 0 };
+
+  if (caller_data) {
+    request_in.m_message = caller_data->buf;
+    request_in.m_length = caller_data->len;
+  }
+
+  if (callee_data) {
+    response_out.m_message = callee_data->buf;
+    response_out.m_length = callee_data->len;
+  }
+
+  switch (((sockaddr*)(caller_id->buf))->sa_family) {
+  case AF_INET: {
+    protocol = netpp::EInternetLayerProtocol::E_IPV4;
+
+    sockaddr_in* ipv4_addr = (sockaddr_in*)caller_id->buf;
+    client_port = std::to_string(htons(ipv4_addr->sin_port));
+
+    client_ip.resize(INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, ipv4_addr, client_ip.data(), client_ip.size());
+  }
+  case AF_INET6: {
+    protocol = netpp::EInternetLayerProtocol::E_IPV6;
+
+    sockaddr_in6* ipv6_addr = (sockaddr_in6*)caller_id->buf;
+    client_port = std::to_string(htons(ipv6_addr->sin6_port));
+
+    client_ip.resize(INET6_ADDRSTRLEN);
+    inet_ntop(AF_INET6, ipv6_addr, client_ip.data(), client_ip.size());
+  }
+  }
+
+  bool has_recv = false, has_send = false;
+  if (sqos) {
+    has_recv = true;
+    has_send = true;
+
+    auto qos_to_spec = [](netpp::NetworkFlowSpec& spec, const FLOWSPEC& qos) {
+      spec.m_token_rate = qos.TokenRate;
+      spec.m_token_bucket_size = qos.TokenBucketSize;
+      spec.m_peak_bandwidth = qos.PeakBandwidth;
+      spec.m_max_latency = qos.Latency;
+      spec.m_jitter_tolerance = qos.DelayVariation;
+
+      switch (qos.ServiceType) {
+      default:
+      case SERVICETYPE_BESTEFFORT:
+        spec.m_service_type = netpp::EServiceType::E_BEST_EFFORT;
+        break;
+      case SERVICETYPE_CONTROLLEDLOAD:
+        spec.m_service_type = netpp::EServiceType::E_CONTROLLED_LOAD;
+        break;
+      case SERVICETYPE_GUARANTEED:
+        spec.m_service_type = netpp::EServiceType::E_GUARANTEED;
+        break;
+      }
+
+      spec.m_max_sdu_size = qos.MaxSduSize;
+      spec.m_min_policed_size = qos.MinimumPolicedSize;
+      };
+
+    qos_to_spec(client_recv, sqos->ReceivingFlowspec);
+    qos_to_spec(client_send, sqos->SendingFlowspec);
+  }
+
+  if (state->m_cond(
+    protocol,
+    client_ip, client_port,
+    has_recv ? &client_recv : nullptr,
+    has_send ? &client_send : nullptr,
+    request_in, response_out)) {
+    return CF_ACCEPT;
+  }
+  else {
+    return CF_REJECT;
+  }
+}
+
 namespace netpp {
 
   static WSADATA wsa_data;
@@ -200,7 +297,6 @@ namespace netpp {
       m_iocp = INVALID_HANDLE_VALUE;
       m_owner_socket_layer = owner_socket_layer;
       m_connected = false;
-      m_connecting = false;
       m_protocol = protocol;
       DisconnectEx = nullptr;
     }
@@ -225,6 +321,8 @@ namespace netpp {
     ETransportLayerProtocol protocol() const override {
       return m_protocol;
     }
+
+    bool is_ready(EPipeOperation op) const override { return m_connected && !is_busy(op); }
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
@@ -340,7 +438,6 @@ namespace netpp {
 
     bool open(uint64_t socket_) override {
       m_socket = socket_;
-      m_connecting = true;
       return true;
     }
 
@@ -351,7 +448,6 @@ namespace netpp {
           ::shutdown(m_socket, SD_BOTH);
           ::closesocket(m_socket);
           m_connected = false;
-          m_connecting = false;
           m_socket = INVALID_SOCKET;
 #else
           if (!DisconnectEx(m_socket, m_recv_overlapped, TF_REUSE_SOCKET, NULL)) {
@@ -398,6 +494,10 @@ namespace netpp {
       }
 
       return true;
+    }
+
+    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
+      return false;
     }
 
     bool bind_and_listen(const char* addr, uint32_t backlog) override {
@@ -534,7 +634,8 @@ namespace netpp {
         time_out = true;
       }
 
-      return future.get();
+      m_connected = future.get();
+      return m_connected;
     }
 
     bool ping() override {
@@ -689,7 +790,6 @@ namespace netpp {
     LPFN_DISCONNECTEX DisconnectEx;
 
     bool m_connected;
-    bool m_connecting;
     bool m_recv_busy;
     bool m_send_busy;
 
@@ -817,6 +917,8 @@ namespace netpp {
     ETransportLayerProtocol protocol() const override {
       return m_protocol;
     }
+
+    bool is_ready(EPipeOperation op) const override { return !is_busy(op); }
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
@@ -1044,6 +1146,30 @@ namespace netpp {
           return false;
         }
         std::this_thread::sleep_for(10ms);
+      }
+
+      return true;
+    }
+
+    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
+      sockaddr_in inaddr;
+      int addr_size = sizeof(sockaddr);
+
+      _WrapperState* state = new _WrapperState;
+      state->m_pipe = this;
+      state->m_cond = accept_cond;
+
+      SOCKET client_socket = ::WSAAccept(m_socket, (sockaddr*)&inaddr, &addr_size, _ServerAcceptCondWrapper, (DWORD_PTR)state);
+      if (client_socket == INVALID_SOCKET) {
+        return false;
+      }
+
+      delete state;
+
+      if (!accept_routine(client_socket)) {
+        ::shutdown(client_socket, SD_BOTH);
+        ::closesocket(client_socket);
+        return false;
       }
 
       return true;
