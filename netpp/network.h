@@ -19,6 +19,9 @@ namespace netpp {
     RawPacket(RawPacket&&) = default;
     RawPacket& operator=(RawPacket&&) = default;
 
+    static RawPacket* create(const char* data, uint32_t size);
+    static const char* build_buf(const RawPacket& packet);
+
     const char* message() const { return m_message; }
     uint32_t length() const { return m_length; }
     const char* m_message;

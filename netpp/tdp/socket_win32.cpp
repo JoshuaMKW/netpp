@@ -74,7 +74,8 @@ namespace netpp {
   }
 
   bool TCP_Socket::send(const RawPacket* packet) {
-    return send(packet->message(), packet->length(), nullptr);
+    const char* packet_buf = RawPacket::build_buf(*packet);
+    return send(packet_buf, packet->length() + 4, nullptr);
   }
 
   void TCP_Socket::clone_callbacks_from(ISocketPipe* other) {

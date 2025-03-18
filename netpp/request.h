@@ -30,6 +30,14 @@ namespace netpp {
     // Returns a heap allocated buffer that must be freed by the caller
     static const char *build_buf(const HTTP_Request& request, uint32_t* size_out);
 
+    static const char* header_begin(const char* http_buf, int buflen);
+    static const char* header_end(const char* http_buf, int buflen);
+
+    static const char* body_begin(const char* http_buf, int buflen);
+    static const char* body_end(const char* http_buf, int buflen);
+
+    static uint32_t content_length(const char* http_buf, int buflen);
+
     EHTTP_RequestMethod method() const { return m_method; }
     std::string path() const { return m_path; }
     std::string version() const { return m_version; }

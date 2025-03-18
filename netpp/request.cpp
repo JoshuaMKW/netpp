@@ -85,7 +85,7 @@ namespace netpp {
 
     for (uint32_t i = 0; i < buflen - 3; i++) {
       if (http_buf[i] == 'H' && http_buf[i + 1] == 'T' && http_buf[i + 2] == 'T' && http_buf[i + 3] == 'P') {
-        is_http = true;
+        is_http = i > 6;
         break;
       }
 
@@ -241,6 +241,76 @@ namespace netpp {
     return request;
   }
 
+  const char* HTTP_Request::header_begin(const char* http_buf, int buflen) {
+    const char* end = http_buf + buflen;
+
+    if (is_whitespace(http_buf[0])) {
+      http_buf = next_token(http_buf, end);
+    }
+
+    if (!is_http_request(http_buf, buflen)) {
+      return nullptr;
+    }
+
+    http_buf += 13;  // Skip "HTTP/X.Y ZZZ "
+    for (int i = 0; i < buflen - 1; i++) {
+      if (http_buf[i] == '\r' && http_buf[i + 1] == '\n') {
+        return &http_buf[i + 2];
+      }
+    }
+
+    return nullptr;
+  }
+
+  const char* HTTP_Request::header_end(const char* http_buf, int buflen) {
+    const char* begin = header_begin(http_buf, buflen);
+    const char* end = http_buf + buflen;
+
+    if (!begin) {
+      return nullptr;
+    }
+
+    if (begin[0] == '\r' && begin[1] == '\n') {
+      return nullptr;
+    }
+
+    return strstr(begin, "\r\n\r\n");
+  }
+
+
+  const char* HTTP_Request::body_begin(const char* http_buf, int buflen) {
+    const char* h_end = header_end(http_buf, buflen);
+    if (!h_end) {
+      return nullptr;
+    }
+
+    const char* end = http_buf + buflen;
+    const char* b_begin = h_end + 4;
+
+    if (b_begin >= end) {
+      return nullptr;
+    }
+
+    return b_begin;
+  }
+
+  const char* HTTP_Request::body_end(const char* http_buf, int buflen) {
+    if (!body_begin(http_buf, buflen)) {
+      return nullptr;
+    }
+    return http_buf + buflen;
+  }
+
+  uint32_t HTTP_Request::content_length(const char* http_buf, int buflen) {
+    const char* content_len_header = strstr(http_buf, "Content-Length: ");
+    if (!content_len_header) {
+      return 0;
+    }
+
+    uint32_t content_len = std::stoi(content_len_header + 16);
+    return content_len;
+  }
+
   void HTTP_Request::add_header(const std::string& header) {
     m_headers[m_headers_count++] = header;
   }
@@ -291,7 +361,7 @@ namespace netpp {
 
     http_size += strlen(request_str);
     http_size += request.path().length();
-    http_size += request.version().length();
+    http_size += request.version().length() + 5;
 
     const std::string* headers = request.headers();
     for (int i = 0; i < request.headers_count(); i++) {
@@ -330,6 +400,9 @@ namespace netpp {
 
     buf_out[offset++] = ' ';
 
+    memcpy(buf_out + offset, "HTTP/", 5);
+    offset += 5;
+
     size_t version_len = request.version().length();
     memcpy(buf_out + offset, request.version().c_str(), version_len);
     offset += version_len;
@@ -365,6 +438,9 @@ namespace netpp {
       *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
       offset += 2;
     }
+
+    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    offset += 2;
     //--------------------------------------------------------------
 
     *size_out = static_cast<uint32_t>(http_size);

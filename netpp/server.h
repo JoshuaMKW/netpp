@@ -67,17 +67,6 @@ protected:
   virtual void emit_error(ISocketPipe* pipe, EServerError error, int reason) = 0;
 };
 
-struct SocketIOState {
-  const char* m_bytes_buf;
-  uint32_t m_bytes_sent;
-  uint32_t m_bytes_total;
-};
-
-struct SocketData {
-  ISocketPipe* m_pipe;
-  SocketIOState m_state;
-};
-
 class TCP_Server final : public IServer {
 public:
   TCP_Server(uint32_t desired_bufsize = 0, uint32_t bufcount = 128, int worker_threads = -1);
@@ -128,7 +117,7 @@ protected:
   ISocketPipe* get_socket_pipe(uint64_t socket);
   void close_socket(ISocketPipe* pipe);
 
-  IApplicationLayerAdapter* handle_inproc_recv(ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info);
+  IApplicationLayerAdapter* handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool &inproc);
 
 #ifdef _WIN32
   static uint64_t server_iocp_thread_win32(void* param);

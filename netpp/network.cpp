@@ -61,4 +61,28 @@ namespace netpp {
     return nullptr;
   }
 
+  RawPacket* RawPacket::create(const char* data, uint32_t size) {
+    if (size <= 4) {
+      return nullptr;
+    }
+
+    uint32_t true_size = *(uint32_t*)data;
+    if (true_size > 1 * 1000 * 1000 * 1000) {
+      return nullptr;
+    }
+
+    return new RawPacket(data + 4, true_size);
+  }
+
+  const char* RawPacket::build_buf(const RawPacket& packet) {
+    if (packet.m_length > 1 * 1000 * 1000 * 1000) {
+      return nullptr;
+    }
+
+    char* buf = new char[packet.m_length + 4];
+    *(uint32_t*)buf = packet.m_length;
+    memcpy_s(buf + 4, packet.m_length, packet.m_message, packet.m_length);
+    return buf;
+  }
+
 } // namespace netpp

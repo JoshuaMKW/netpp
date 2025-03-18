@@ -120,6 +120,8 @@ namespace netpp {
     virtual ~IApplicationLayerAdapter() = default;
 
     virtual bool on_receive(ISocketPipe *pipe, const char* data, uint32_t size, uint32_t flags) = 0;
+    virtual uint32_t calc_size(const char* data, uint32_t size) = 0;
+    virtual uint32_t calc_proc_size(const char* data, uint32_t size) = 0;
   };
 
   class DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -128,6 +130,8 @@ namespace netpp {
     ~DNS_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class HTTP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -136,6 +140,8 @@ namespace netpp {
     ~HTTP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class HTTPS_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -144,6 +150,8 @@ namespace netpp {
     ~HTTPS_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class RAW_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -152,6 +160,8 @@ namespace netpp {
     ~RAW_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class RTP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -160,6 +170,8 @@ namespace netpp {
     ~RTP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class RTCP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -168,6 +180,8 @@ namespace netpp {
     ~RTCP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class SIP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -176,6 +190,8 @@ namespace netpp {
     ~SIP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class ApplicationAdapterFactory {

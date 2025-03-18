@@ -78,7 +78,8 @@ namespace netpp {
 
     m_startup_thread = std::this_thread::get_id();
     m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
-    m_server_socket.m_state = { 0, 0 };
+    m_server_socket.m_recv_state = { nullptr, 0, 0 };
+    m_server_socket.m_send_state = { nullptr, 0, 0 };
   }
 
   TCP_Server::~TCP_Server() {
@@ -304,55 +305,38 @@ namespace netpp {
     m_purgatory_sockets.push(pipe->socket());
   }
 
-  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
-    bool is_message_complete = false;
-    uint32_t message_size = 0;  // 0 == unknown size
-
-    char* recv_buf = pipe->recv_buf();
-    uint32_t recv_buf_offset = 0;
-    uint32_t content_length = 0;
-
+  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool &inproc) {
+    ISocketPipe* pipe = data.m_pipe;
     IApplicationLayerAdapter* adapter = nullptr;
 
-    do {
-      uint32_t flags = 0;
-      uint32_t transferred = 0;
-      bool recv_result = pipe->recv(recv_buf_offset, &flags, &transferred);
-      if (!recv_result) {
-        continue;
+    char* recv_buf = pipe->get_os_layer()->recv_buf();
+
+    data.m_recv_state.m_bytes_sent += info.m_bytes_transferred;
+
+    if (!inproc) {
+      char* proc_out = new char[info.m_bytes_transferred];
+      {
+        // Here we process enough to determine the underlying protocol
+        pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+        adapter = ApplicationAdapterFactory::detect(proc_out, info.m_bytes_transferred);
+        data.m_recv_state.m_bytes_total = adapter->calc_size(proc_out, info.m_bytes_transferred);
       }
+      delete proc_out;
+    }
 
-      const char* http_header_begin = HTTP_Response::header_begin(recv_buf, transferred);
-      if (!http_header_begin) {
-        // Not HTTP, treat as raw packet
+    uint32_t flags = 0;
+    if (data.m_recv_state.m_bytes_total == 0) {
+      uint32_t transferred;
+      pipe->recv(0, &flags, &transferred);
+      inproc = true;
+    }
+    else if (data.m_recv_state.m_bytes_sent < data.m_recv_state.m_bytes_total) {
+      uint32_t transferred;
+      pipe->recv(0, &flags, &transferred);
+      inproc = true;
+    }
 
-        // If the message size is not known, read the first 4 bytes
-        if (recv_buf_offset == 0) {
-          message_size = *(uint32_t*)recv_buf;
-        }
-
-        // Advance the buffer offset
-        recv_buf_offset += transferred;
-        is_message_complete = recv_buf_offset >= message_size;
-      }
-      else {
-        // HTTP, treat as HTTP request
-        recv_buf_offset += transferred;
-
-        if (content_length == 0) {
-          if (const char* h_end = HTTP_Response::header_end(recv_buf, recv_buf_offset)) {
-            content_length = HTTP_Response::content_length(recv_buf, recv_buf_offset);
-            message_size =
-              ((uint32_t)(h_end - recv_buf) + 4) + content_length;
-          }
-        }
-
-        is_message_complete = message_size > 0 && recv_buf_offset >= message_size;
-
-        adapter = ApplicationAdapterFactory::detect(recv_buf, info.m_bytes_transferred);
-      }
-    } while (!is_message_complete);
-
+    inproc = false;
     return adapter;
   }
 
@@ -443,34 +427,41 @@ namespace netpp {
 
         switch (info.m_operation) {
         case EPipeOperation::E_RECV: {
-          IApplicationLayerAdapter* adapter = server->handle_inproc_recv(pipe, info);
+          bool inproc = false;
+          IApplicationLayerAdapter* adapter = server->handle_inproc_recv(sock_data, info, inproc);
           if (!adapter) {
-            server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+            pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+            sock_data.m_recv_state = { nullptr, 0, 0 };
             return false;
           }
 
-          if (!adapter->on_receive(sock_data.m_pipe, pipe->recv_buf(), info.m_bytes_transferred, 0)) {
-            server->m_server_socket.m_pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
-            return false;
+          if (!inproc) {
+            if (!adapter->on_receive(sock_data.m_pipe, pipe->recv_buf(), sock_data.m_recv_state.m_bytes_sent, 0)) {
+              pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+              sock_data.m_recv_state = { nullptr, 0, 0 };
+              return false;
+            }
+            sock_data.m_recv_state.m_bytes_sent = 0;
+            sock_data.m_recv_state.m_bytes_total = 0;
           }
           break;
         }
         case EPipeOperation::E_SEND: {
           // Check if the send is incomplete (chunking the data)
-          sock_data.m_state.m_bytes_sent += info.m_bytes_transferred;
+          sock_data.m_send_state.m_bytes_sent += info.m_bytes_transferred;
 
-          const int32_t bytes_left = sock_data.m_state.m_bytes_total - sock_data.m_state.m_bytes_sent;
+          const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_sent;
           if (bytes_left > 0) {
             // Send the remaining data
-            pipe->send(sock_data.m_state.m_bytes_buf + sock_data.m_state.m_bytes_sent, bytes_left, nullptr);
+            pipe->send(sock_data.m_send_state.m_bytes_buf + sock_data.m_send_state.m_bytes_sent, bytes_left, nullptr);
           }
           else {
             // Send is complete
-            sock_data.m_state.m_bytes_sent = 0;
-            sock_data.m_state.m_bytes_total = 0;
+            sock_data.m_send_state.m_bytes_sent = 0;
+            sock_data.m_send_state.m_bytes_total = 0;
 
-            delete[] sock_data.m_state.m_bytes_buf;
-            sock_data.m_state.m_bytes_buf = nullptr;
+            delete[] sock_data.m_send_state.m_bytes_buf;
+            sock_data.m_send_state.m_bytes_buf = nullptr;
           }
           break;
         }

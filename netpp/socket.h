@@ -69,6 +69,7 @@ namespace netpp {
   };
 
   enum class EPipeOperation {
+    E_NONE,  // Can be used to check for connectivity status using pipe->is_ready
     E_RECV,
     E_SEND,
     E_RECV_SEND,
@@ -276,6 +277,18 @@ namespace netpp {
     }
   };
 
+  struct SocketIOState {
+    const char* m_bytes_buf;
+    uint32_t m_bytes_sent;
+    uint32_t m_bytes_total;
+  };
+
+  struct SocketData {
+    ISocketPipe* m_pipe;
+    SocketIOState m_recv_state;
+    SocketIOState m_send_state;
+  };
+
   /// <summary>
   /// Implements TCP socket functionality
   /// </summary>
@@ -328,7 +341,10 @@ namespace netpp {
     // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
 
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override { return true; }
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+      memcpy_s(out_data, out_size, in_data, in_size);
+      return true;
+    }
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
@@ -352,15 +368,17 @@ namespace netpp {
     void on_sip_response(sip_response_cb cb) override { m_signal_sip_response = cb; }
     void clone_callbacks_from(ISocketPipe* other) override;
 
-    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_signal_dns_request(this, request); }
-    const DNS_Request* signal_dns_response(const DNS_Response* response) override { return m_signal_dns_response(this, response); }
-    const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_signal_http_request(this, request); }
-    const HTTP_Request* signal_http_response(const HTTP_Response* response) override { return m_signal_http_response(this, response); }
-    const RawPacket* signal_raw_receive(const RawPacket* packet) override { return m_signal_raw_receive(this, packet); }
-    void signal_rtp_packet(const RTP_Packet* packet) override { m_signal_rtp_packet(this, packet); }
-    void signal_rtcp_packet(const RTCP_Packet* packet) override { m_signal_rtcp_packet(this, packet); }
-    const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_signal_sip_request(this, request); }
-    const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_signal_sip_response(this, response); }
+    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_signal_dns_request ? m_signal_dns_request(this, request) : nullptr; }
+    const DNS_Request* signal_dns_response(const DNS_Response* response) override {
+      return m_signal_dns_response ? m_signal_dns_response(this, response) : nullptr;
+    }
+    const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_signal_http_request ? m_signal_http_request(this, request) : nullptr; }
+    const HTTP_Request* signal_http_response(const HTTP_Response* response) override { return m_signal_http_response ? m_signal_http_response(this, response) : nullptr; }
+    const RawPacket* signal_raw_receive(const RawPacket* packet) override { return m_signal_raw_receive ? m_signal_raw_receive(this, packet) : nullptr; }
+    void signal_rtp_packet(const RTP_Packet* packet) override { if (m_signal_rtp_packet) m_signal_rtp_packet(this, packet); }
+    void signal_rtcp_packet(const RTCP_Packet* packet) override { if (m_signal_rtcp_packet) m_signal_rtcp_packet(this, packet); }
+    const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_signal_sip_request ? m_signal_sip_request(this, request) : nullptr; }
+    const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_signal_sip_response ? m_signal_sip_response(this, response) : nullptr; }
 
     ISocketIOResult* wait_results() override { return m_socket_layer->wait_results(); }
 
@@ -442,7 +460,10 @@ namespace netpp {
     // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
 
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override { return true; }
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+      memcpy_s(out_data, out_size, in_data, in_size);
+      return true;
+    }
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {

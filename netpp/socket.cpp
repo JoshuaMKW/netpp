@@ -208,6 +208,7 @@ namespace netpp {
     EPipeOperation Operation;
     ISocketOSSupportLayer* Pipe;
     BOOL IsBusy;
+    uint32_t Transferred;
   };
 
   struct Tag_WSA_OVERLAPPED : public WSAOVERLAPPED {
@@ -229,7 +230,7 @@ namespace netpp {
 
   class Win32ClientSocketIOResult : public ISocketIOResult {
   public:
-    Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, HANDLE iocp, size_t capacity = 16) : m_pipe(pipe) {
+    Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, HANDLE iocp) : m_pipe(pipe) {
       DWORD transferred_;
       ULONG_PTR completion_key;
       LPOVERLAPPED overlapped;
@@ -270,7 +271,7 @@ namespace netpp {
       StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
       : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
       m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK),
-      m_recv_busy(false), m_send_busy(false) {
+      m_recv_busy(false), m_send_busy(false), m_recv_transferred(0) {
       m_socket = INVALID_SOCKET;
       m_recv_buffer = new Tag_WSA_BUF{
         nullptr,
@@ -326,6 +327,8 @@ namespace netpp {
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
+      case EPipeOperation::E_NONE:
+        return false;
       case EPipeOperation::E_RECV:
         return m_recv_busy;
       case EPipeOperation::E_SEND:
@@ -419,6 +422,7 @@ namespace netpp {
           error(ESocketErrorReason::E_REASON_SOCKET);
           return false;
         }
+        break;
       }
       case ETransportLayerProtocol::E_UDP: {
         socket_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -426,6 +430,7 @@ namespace netpp {
           error(ESocketErrorReason::E_REASON_SOCKET);
           return false;
         }
+        break;
       }
       }
 #endif
@@ -523,12 +528,22 @@ namespace netpp {
         }
       }
 #else
+      if (m_connected) {
+        return true;
+      }
+
+      if (m_connecting) {
+        return false;
+      }
+
       char buf[1];
       int rc = ::recv(m_socket, buf, 1, MSG_PEEK);
       if (rc > 0) {
         return true;
       }
 #endif
+
+      m_connecting = true;
 
       // Connect to the server...
       sockaddr_in server_addr;
@@ -538,7 +553,7 @@ namespace netpp {
       server_addr.sin_port = htons(atoi(m_port.c_str()));
       inet_pton(AF_INET, m_host_name.c_str(), &server_addr.sin_addr);
 
-      std::atomic<bool> time_out = false;
+      std::atomic<bool> time_out(false);
 
       auto future = std::async(std::launch::async, [&time_out](SOCKET socket, sockaddr* addr, size_t addr_size) {
 #if CLIENT_USE_WSA
@@ -618,6 +633,7 @@ namespace netpp {
 #else
           if (::connect(socket, addr, (int)addr_size) == SOCKET_ERROR) {
             //client->emit_error(nullptr, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_LISTEN);
+            int rc = WSAGetLastError();
             if (time_out) {
               return false;
             }
@@ -635,6 +651,7 @@ namespace netpp {
       }
 
       m_connected = future.get();
+      m_connecting = false;
       return m_connected;
     }
 
@@ -665,6 +682,7 @@ namespace netpp {
 #else
       int flags_ = flags ? *flags : 0;
       *transferred_out = ::recv(m_socket, m_recv_buffer->buf + offset, recv_buf_size() - offset, flags_);
+      int rc = WSAGetLastError();
       if (*transferred_out == 0) {
         error(ESocketErrorReason::E_REASON_PORT);
         return false;
@@ -756,7 +774,7 @@ namespace netpp {
     void set_send_buf_size(uint32_t size) override {}
 
     ISocketIOResult* wait_results() override {
-      return new Win32ClientSocketIOResult(this, m_iocp, 32);
+      return new Win32ClientSocketIOResult(this, m_iocp);
     }
 
     void* sys_data() const override { return m_iocp; }
@@ -787,11 +805,14 @@ namespace netpp {
     Tag_WSA_OVERLAPPED* m_recv_overlapped;
     Tag_WSA_OVERLAPPED* m_send_overlapped;
 
+    uint32_t m_recv_transferred;
+
     LPFN_DISCONNECTEX DisconnectEx;
 
-    bool m_connected;
-    bool m_recv_busy;
-    bool m_send_busy;
+    std::atomic<bool> m_connected;
+    std::atomic<bool> m_connecting;
+    std::atomic<bool> m_recv_busy;
+    std::atomic<bool> m_send_busy;
 
     ETransportLayerProtocol m_protocol;
   };
@@ -922,6 +943,8 @@ namespace netpp {
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
+      case EPipeOperation::E_NONE:
+        return false;
       case EPipeOperation::E_RECV:
         return m_recv_buffer->IsBusy;
       case EPipeOperation::E_SEND:

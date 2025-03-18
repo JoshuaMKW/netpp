@@ -191,6 +191,7 @@ namespace netpp {
       std::string body_str(http_buf, end);
       if (content_length_int != body_str.length()) {
         fprintf(stderr, "Content-Length does not match body length\n");
+        body_str.resize(content_length_int);
       }
 
       response->set_body(body_str);
@@ -302,9 +303,13 @@ namespace netpp {
       offset += 16;
       memcpy(response_buf + offset, body_len_str.c_str(), body_len_str.length());
       offset += body_len_str.length();
-      memcpy(response_buf + offset, "\r\n", 2);
+
+      *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
       offset += 2;
     }
+
+    *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
+    offset += 2;
 
     //-------------------------------------------------------------
 

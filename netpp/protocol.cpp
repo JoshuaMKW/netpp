@@ -5,9 +5,16 @@
 
 namespace netpp {
 
-  bool DNS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags)
-  {
+  bool DNS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
+  }
+
+  uint32_t DNS_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  uint32_t DNS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return 0;
   }
 
   bool HTTP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
@@ -46,36 +53,93 @@ namespace netpp {
     return false;
   }
 
+  uint32_t HTTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    if (const char* h_end = HTTP_Request::header_end(data, size)) {
+      uint32_t content_length = HTTP_Request::content_length(data, size);
+      return ((uint32_t)(h_end - data) + 4) + (content_length ? content_length + 2 : 0);
+    }
+
+    if (const char* h_end = HTTP_Response::header_end(data, size)) {
+      uint32_t content_length = HTTP_Response::content_length(data, size);
+      return ((uint32_t)(h_end - data) + 4) + (content_length ? content_length + 2 : 0);
+    }
+    return 0;
+  }
+
+  uint32_t HTTP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return calc_size(data, size);
+  }
+
   bool HTTPS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
+  uint32_t HTTPS_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  uint32_t HTTPS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return calc_size(data, size) - (TLS_SocketProxy::iv_size + TLS_SocketProxy::key_size);
+  }
+
   bool RAW_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
-    RawPacket packet(data, size);
+    if (data == nullptr || size <= 4) {
+      return false;
+    }
+
+    RawPacket packet(data + sizeof(uint32_t), size - sizeof(uint32_t));
 
     const RawPacket* response = pipe->signal_raw_receive(&packet);
     if (response) {
       pipe->send(response);
       delete response;
-      return true;
     }
 
+    return true;
+  }
+
+  uint32_t RAW_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return size >= 4 ? *(uint32_t*)data + 4 : 0;
+  }
+
+  uint32_t RAW_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return calc_size(data, size);
+  }
+
+  bool RTP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  bool RTP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags)
-  {
+  uint32_t RTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  uint32_t RTP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  bool RTCP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  bool RTCP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags)
-  {
+  uint32_t RTCP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  uint32_t RTCP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  bool SIP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  bool SIP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags)
-  {
-    return false;
+  uint32_t SIP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+    return 0;
+  }
+
+  uint32_t SIP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+    return 0;
   }
 
   IApplicationLayerAdapter* ApplicationAdapterFactory::create(EApplicationLayerProtocol protocol) {
