@@ -79,7 +79,7 @@ namespace netpp {
   }
 
   uint32_t HTTPS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
-    return calc_size(data, size) - (TLS_SocketProxy::iv_size + TLS_SocketProxy::key_size);
+    return calc_size(data, size) - (TLS_SocketProxy::record_size + TLS_SocketProxy::iv_size + TLS_SocketProxy::key_size);
   }
 
   bool RAW_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {

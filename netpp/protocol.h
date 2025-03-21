@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "netpp.h"
 #include "network.h"
 
 struct sockaddr;
@@ -36,7 +37,7 @@ namespace netpp {
 
 #pragma region Transport Layer
 
-  class ITransportLayerAdapter {
+  class NETPP_API ITransportLayerAdapter {
   public:
     virtual ~ITransportLayerAdapter() = default;
 
@@ -58,7 +59,7 @@ namespace netpp {
     virtual void set_user_context(void* ctx) = 0;
   };
 
-  class TCPTransportAdapter final : public ITransportLayerAdapter {
+  class NETPP_API TCPTransportAdapter final : public ITransportLayerAdapter {
   public:
     TCPTransportAdapter() = default;
     ~TCPTransportAdapter() override = default;
@@ -81,7 +82,7 @@ namespace netpp {
     bool send(uint64_t sockfd, sockaddr* inaddr, const char* buffer, uint32_t size, uint32_t* flags) override;
   };
 
-  class UDPTransportAdapter final : public ITransportLayerAdapter {
+  class NETPP_API UDPTransportAdapter final : public ITransportLayerAdapter {
   public:
     UDPTransportAdapter(bool server_mode, void* user_data);
     ~UDPTransportAdapter() override = default;
@@ -115,7 +116,7 @@ namespace netpp {
 
   class ISocketPipe;
 
-  class IApplicationLayerAdapter {
+  class NETPP_API IApplicationLayerAdapter {
   public:
     virtual ~IApplicationLayerAdapter() = default;
 
@@ -124,7 +125,7 @@ namespace netpp {
     virtual uint32_t calc_proc_size(const char* data, uint32_t size) = 0;
   };
 
-  class DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     DNS_ApplicationAdapter() = default;
     ~DNS_ApplicationAdapter() override = default;
@@ -134,7 +135,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class HTTP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API HTTP_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     HTTP_ApplicationAdapter() = default;
     ~HTTP_ApplicationAdapter() override = default;
@@ -144,7 +145,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class HTTPS_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API HTTPS_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     HTTPS_ApplicationAdapter() = default;
     ~HTTPS_ApplicationAdapter() override = default;
@@ -154,7 +155,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class RAW_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API RAW_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     RAW_ApplicationAdapter() = default;
     ~RAW_ApplicationAdapter() override = default;
@@ -164,7 +165,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class RTP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API RTP_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     RTP_ApplicationAdapter() = default;
     ~RTP_ApplicationAdapter() override = default;
@@ -174,7 +175,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class RTCP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API RTCP_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     RTCP_ApplicationAdapter() = default;
     ~RTCP_ApplicationAdapter() override = default;
@@ -184,7 +185,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class SIP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API SIP_ApplicationAdapter final : public IApplicationLayerAdapter {
   public:
     SIP_ApplicationAdapter() = default;
     ~SIP_ApplicationAdapter() override = default;
@@ -194,7 +195,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class ApplicationAdapterFactory {
+  class NETPP_API ApplicationAdapterFactory {
   public:
     static IApplicationLayerAdapter* create(EApplicationLayerProtocol protocol);
     static IApplicationLayerAdapter* detect(const char* data, uint32_t size);

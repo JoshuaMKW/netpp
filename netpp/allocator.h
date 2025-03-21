@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "netpp.h"
+
 namespace netpp {
 
   class StaticBlockAllocator {
@@ -28,9 +30,9 @@ namespace netpp {
     uint32_t block(void* ptr) const;
 
   private:
-    void* m_buffer;
-    uint32_t m_block_size;
-    uint32_t m_block_count;
+    void* m_buffer = nullptr;
+    uint32_t m_block_size = 0;
+    uint32_t m_block_count = 0;
 
     std::vector<bool> m_block_used;
   };

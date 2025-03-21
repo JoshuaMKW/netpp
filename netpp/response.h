@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "netpp.h"
+
 namespace netpp {
 
   enum class EHTTP_ResponseStatusCode {
@@ -73,7 +75,7 @@ namespace netpp {
 
   const char* http_response_status(EHTTP_ResponseStatusCode status);
 
-  class HTTP_Response {
+  class NETPP_API HTTP_Response {
   public:
     static bool is_http_response(const char* http_buf, uint32_t buflen);
     static HTTP_Response* create(EHTTP_ResponseStatusCode status);

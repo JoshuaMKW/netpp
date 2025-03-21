@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #pragma comment(lib, "ws2_32.lib")
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mswsockdef.h>
@@ -14,11 +15,14 @@
 #include <sys/socket.h>
 #endif
 
+#include "netpp.h"
 #include "allocator.h"
 #include "network.h"
 #include "protocol.h"
 #include "request.h"
 #include "response.h"
+
+#include <openssl\ssl.h>
 
 #ifndef DEFAULT_PORT
 #define DEFAULT_PORT "8080"
@@ -94,7 +98,7 @@ namespace netpp {
 
   class ISocketOSSupportLayer;
 
-  class ISocketIOResult {
+  class NETPP_API ISocketIOResult {
   public:
     struct OperationData {
       EPipeOperation m_operation;
@@ -109,7 +113,7 @@ namespace netpp {
     virtual bool for_each(each_fn cb) = 0;
   };
 
-  class ISocketOSSupportLayer {
+  class NETPP_API ISocketOSSupportLayer {
   public:
     using close_cb = std::function<bool(ISocketOSSupportLayer*)>;
     using error_cb = std::function<bool(ISocketOSSupportLayer*, ESocketErrorReason reason)>;
@@ -173,9 +177,10 @@ namespace netpp {
 
     virtual void on_close(close_cb cb) = 0;
     virtual void on_error(error_cb cb) = 0;
+    virtual void clone_callbacks_from(ISocketOSSupportLayer* other) = 0;
   };
 
-  class SocketOSSupportLayerFactory {
+  class NETPP_API SocketOSSupportLayerFactory {
   public:
     static bool initialize(uint64_t socket);
     static ISocketOSSupportLayer* create(netpp::ISocketOSSupportLayer* owner_socker_layer,
@@ -186,7 +191,7 @@ namespace netpp {
 
   class IServer;
 
-  class ISocketPipe {
+  class NETPP_API ISocketPipe {
   public:
     using close_cb = std::function<bool(ISocketPipe*)>;
     using error_cb = std::function<bool(ISocketPipe*, ESocketErrorReason reason)>;
@@ -277,13 +282,13 @@ namespace netpp {
     }
   };
 
-  struct SocketIOState {
+  struct NETPP_API SocketIOState {
     const char* m_bytes_buf;
     uint32_t m_bytes_sent;
     uint32_t m_bytes_total;
   };
 
-  struct SocketData {
+  struct NETPP_API SocketData {
     ISocketPipe* m_pipe;
     SocketIOState m_recv_state;
     SocketIOState m_send_state;
@@ -292,7 +297,7 @@ namespace netpp {
   /// <summary>
   /// Implements TCP socket functionality
   /// </summary>
-  class TCP_Socket : public ISocketPipe {
+  class NETPP_API TCP_Socket : public ISocketPipe {
   public:
     TCP_Socket(ISocketOSSupportLayer* owner_socket_layer,
       StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint = ESocketHint::E_NONE);
@@ -413,7 +418,7 @@ namespace netpp {
   /// <summary>
   /// Implements UDP socket functionality
   /// </summary>
-  class UDP_Socket : public ISocketPipe {
+  class NETPP_API UDP_Socket : public ISocketPipe {
   public:
     UDP_Socket(ISocketOSSupportLayer* owner_socket_layer,
       StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint = ESocketHint::E_NONE);
@@ -531,18 +536,14 @@ namespace netpp {
   /// Uses AES-256 standard AES-GCM encryption for the TLS layer.
   /// It also acts as a proxy layer for an internal socket provided by the constructor argument.
   /// </summary>
-  class TLS_SocketProxy : public ISocketPipe {
+  class NETPP_API TLS_SocketProxy : public ISocketPipe {
   public:
     inline static const size_t key_size = 32;  // AES-256
     inline static const size_t iv_size = 12;   // IV size for AES-GCM
     inline static const size_t tag_size = 16;  // Auth tag size
+    inline static const size_t record_size = 5;  // TLS-record size
 
-    TLS_SocketProxy(ISocketPipe* pipe, uint8_t* aes_key = nullptr) : m_pipe(pipe) {
-      if (aes_key) {
-        memmove(m_aes_key, aes_key, key_size);
-      }
-    }
-
+    TLS_SocketProxy(ISocketPipe* pipe, uint8_t* aes_key = nullptr);
     ~TLS_SocketProxy() override { delete m_pipe; }
 
     uint64_t socket() const override { return m_pipe->socket(); }
@@ -554,10 +555,25 @@ namespace netpp {
     bool is_busy(EPipeOperation op) const override { return m_pipe->is_busy(op); }
 
     bool open(const char* hostname, const char* port) override;
+    bool open(uint64_t socket) override;
+
     void close() override;
     void error(ESocketErrorReason reason) override { m_pipe->error(reason); }
 
+    bool notify_all() override { return m_pipe->notify_all(); }
+
     bool sync(uint64_t wait_time = 0) override { return m_pipe->sync(); }
+
+    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
+
+    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
+      return m_pipe->bind_and_listen(addr, backlog);
+    }
+
+    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
+
+    // Blocking call to check for alive connection
+    bool ping() override;
 
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
@@ -582,6 +598,7 @@ namespace netpp {
     void on_rtcp_packet(rtcp_packet_cb cb) override { m_pipe->on_rtcp_packet(cb); }
     void on_sip_request(sip_request_cb cb) override { m_pipe->on_sip_request(cb); }
     void on_sip_response(sip_response_cb cb) override { m_pipe->on_sip_response(cb); }
+    void clone_callbacks_from(ISocketPipe* other) override { m_pipe->clone_callbacks_from(static_cast<TLS_SocketProxy*>(other)->m_pipe); }
 
     const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_pipe->signal_dns_request(request); }
     const DNS_Request* signal_dns_response(const DNS_Response* response) override { return m_pipe->signal_dns_response(response); }
@@ -593,14 +610,41 @@ namespace netpp {
     const SIP_Response* signal_sip_request(const SIP_Request* request) override { return m_pipe->signal_sip_request(request); }
     const SIP_Request* signal_sip_response(const SIP_Response* response) override { return m_pipe->signal_sip_response(response); }
 
+    ISocketIOResult* wait_results() override { return m_pipe->wait_results(); }
+
     void* sys_data() const override { return m_pipe->sys_data(); }
     void* user_data() const override { return m_pipe->user_data(); }
 
     ISocketOSSupportLayer* get_os_layer() const { return m_pipe->get_os_layer(); }
 
+  protected:
+    /*
+    Suite of protocols used in the TLS handshake
+
+    Internally uses OpenSSL
+    */
+
+    bool recv_client_hello();
+    bool recv_server_hello();
+
+    bool send_client_hello();
+    bool send_server_hello();
+
+    bool send_server_certificate();
+    
+    bool send_client_key_exchange();
+
+    bool recv_change_cipher_spec();
+    bool send_change_cipher_spec();
+
+    bool send_finished();
+    bool recv_finished();
+
   private:
     ISocketPipe* m_pipe;
     uint8_t m_aes_key[key_size] = {};
+    SSL_CTX* m_tls_ctx;
+    SSL* m_ssl;
   };
 
   bool sockets_initialize();

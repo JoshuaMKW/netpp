@@ -59,7 +59,7 @@ namespace netpp {
 
   void UDP_Socket::clone_callbacks_from(ISocketPipe* other) {
     UDP_Socket* udp = static_cast<UDP_Socket*>(other);
-    //m_signal_close = udp->m_signal_close;
+    m_socket_layer->clone_callbacks_from(udp->m_socket_layer);
     m_signal_dns_request = udp->m_signal_dns_request;
     m_signal_dns_response = udp->m_signal_dns_response;
     m_signal_http_request = udp->m_signal_http_request;

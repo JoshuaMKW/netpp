@@ -2,12 +2,21 @@
 
 #include <cstdint>
 
+#include "netpp.h"
+
 namespace netpp {
 
-  class RawPacket {
+  class NETPP_API RawPacket {
   public:
-    RawPacket(uint32_t length) : m_length(length) {}
-    RawPacket(const char* message, uint32_t length) : m_message(message), m_length(length) {}
+    RawPacket(uint32_t length) : m_length(length), m_owns_buf(true) {
+      m_message = new char[length];
+    }
+    RawPacket(const char* message, uint32_t length) : m_message(message), m_length(length), m_owns_buf(false) {}
+    ~RawPacket() {
+      if (m_owns_buf) {
+        delete[] m_message;
+      }
+    }
 
   protected:
     RawPacket() = default;
@@ -24,6 +33,9 @@ namespace netpp {
 
     const char* message() const { return m_message; }
     uint32_t length() const { return m_length; }
+
+  private:
+    bool m_owns_buf;
     const char* m_message;
     uint32_t m_length;
   };

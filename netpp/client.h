@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "netpp.h"
 #include "allocator.h"
 #include "network.h"
 #include "response.h"
@@ -22,9 +23,9 @@ namespace netpp {
     E_COUNT,
   };
 
-  const char* client_error(EClientError error, int reason);
+  NETPP_API const char* client_error(EClientError error, int reason);
 
-  class IClient {
+  class NETPP_API IClient {
   public:
     using receive_cb = std::function<RawPacket* (const ISocketPipe* source, const RawPacket* packet)>;
     using request_cb = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
@@ -73,7 +74,7 @@ namespace netpp {
     virtual void emit_error(ISocketPipe* pipe, EClientError error, int reason) = 0;
   };
 
-  class TCP_Client final : public IClient {
+  class NETPP_API TCP_Client final : public IClient {
   public:
     TCP_Client(uint32_t bufsize = 4096);
     ~TCP_Client();

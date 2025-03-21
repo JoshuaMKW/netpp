@@ -25,8 +25,8 @@ using namespace std::chrono_literals;
 #define CLIENT_USE_WSA false
 
 struct _WrapperState {
-  netpp::ISocketOSSupportLayer* m_pipe;
-  netpp::ISocketOSSupportLayer::accept_cond_cb m_cond;
+  netpp::ISocketOSSupportLayer* m_pipe = nullptr;
+  netpp::ISocketOSSupportLayer::accept_cond_cb m_cond = nullptr;
 };
 
 static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
@@ -45,13 +45,11 @@ static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
   netpp::RawPacket response_out = { nullptr, 0 };
 
   if (caller_data) {
-    request_in.m_message = caller_data->buf;
-    request_in.m_length = caller_data->len;
+    request_in = netpp::RawPacket(caller_data->buf, caller_data->len);
   }
 
   if (callee_data) {
-    response_out.m_message = callee_data->buf;
-    response_out.m_length = callee_data->len;
+    response_out = netpp::RawPacket(callee_data->buf, callee_data->len);
   }
 
   switch (((sockaddr*)(caller_id->buf))->sa_family) {
@@ -63,6 +61,7 @@ static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
 
     client_ip.resize(INET_ADDRSTRLEN);
     inet_ntop(AF_INET, ipv4_addr, client_ip.data(), client_ip.size());
+    break;
   }
   case AF_INET6: {
     protocol = netpp::EInternetLayerProtocol::E_IPV6;
@@ -72,6 +71,7 @@ static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
 
     client_ip.resize(INET6_ADDRSTRLEN);
     inet_ntop(AF_INET6, ipv6_addr, client_ip.data(), client_ip.size());
+    break;
   }
   }
 
@@ -208,7 +208,6 @@ namespace netpp {
     EPipeOperation Operation;
     ISocketOSSupportLayer* Pipe;
     BOOL IsBusy;
-    uint32_t Transferred;
   };
 
   struct Tag_WSA_OVERLAPPED : public WSAOVERLAPPED {
@@ -783,6 +782,12 @@ namespace netpp {
     void on_close(close_cb cb) { m_on_close = cb; }
     void on_error(error_cb cb) { m_on_error = cb; }
 
+    void clone_callbacks_from(ISocketOSSupportLayer* other) {
+      Win32ClientSocketLayer* tcp = static_cast<Win32ClientSocketLayer*>(other);
+      m_on_close = tcp->m_on_close;
+      m_on_error = tcp->m_on_error;
+    }
+
   private:
     std::string m_host_name;
     std::string m_port;
@@ -1302,6 +1307,12 @@ namespace netpp {
 
     void on_close(close_cb cb) { m_on_close = cb; }
     void on_error(error_cb cb) { m_on_error = cb; }
+
+    void clone_callbacks_from(ISocketOSSupportLayer* other) {
+      Win32ServerSocketLayer* tcp = static_cast<Win32ServerSocketLayer*>(other);
+      m_on_close = tcp->m_on_close;
+      m_on_error = tcp->m_on_error;
+    }
 
   private:
     std::string m_host_name;

@@ -24,7 +24,9 @@ namespace netpp {
     return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
-  TCP_Server::TCP_Server(uint32_t desired_bufsize, uint32_t bufcount, int max_threads) {
+  TCP_Server::TCP_Server(bool use_tls_ssl, uint32_t desired_bufsize, uint32_t bufcount, int max_threads) : m_stop_flag(false) {
+    m_tls_ssl = use_tls_ssl;
+
     m_error = EServerError::E_NONE;
     m_reason = -1;
 
@@ -77,7 +79,15 @@ namespace netpp {
     }
 
     m_startup_thread = std::this_thread::get_id();
-    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+
+    ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+    if (m_tls_ssl) {
+      m_server_socket.m_pipe = new TLS_SocketProxy(pipe);
+    }
+    else {
+      m_server_socket.m_pipe = pipe;
+    }
+
     m_server_socket.m_recv_state = { nullptr, 0, 0 };
     m_server_socket.m_send_state = { nullptr, 0, 0 };
   }
@@ -305,7 +315,7 @@ namespace netpp {
     m_purgatory_sockets.push(pipe->socket());
   }
 
-  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool &inproc) {
+  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool& inproc) {
     ISocketPipe* pipe = data.m_pipe;
     IApplicationLayerAdapter* adapter = nullptr;
 
@@ -345,7 +355,13 @@ namespace netpp {
       uint64_t socket = m_awaiting_sockets.front();
       m_awaiting_sockets.pop();
 
-      ISocketPipe* client_pipe = new TCP_Socket(m_server_socket.m_pipe->get_os_layer(), &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+      ISocketPipe* client_pipe = new TCP_Socket(
+        m_server_socket.m_pipe->get_os_layer(), &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+
+      if (m_tls_ssl) {
+        client_pipe = new TLS_SocketProxy(client_pipe);
+      }
+
       client_pipe->open(socket);
       client_pipe->clone_callbacks_from(m_server_socket.m_pipe);
 
@@ -363,10 +379,8 @@ namespace netpp {
       }
       std::unique_lock<std::mutex> lock(m_mutex);
       if (!pipe->recv(0, NULL, NULL)) {
-        int err = ::WSAGetLastError();
-        if (err != WSA_IO_PENDING) {
-          pipe->error(ESocketErrorReason::E_REASON_RECV);
-        }
+        // pipe->error(ESocketErrorReason::E_REASON_RECV);
+        continue;
       }
     }
   }

@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server;
+  TCP_Server server(true);
 
   std::ofstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt", std::ios_base::app);
   if (!history_file.is_open()) {
@@ -99,8 +99,8 @@ int main(int argc, char** argv) {
 
 
   server.on_raw_receive([&](const ISocketPipe* source, const RawPacket* packet) {
-    MessagePacket* msg = (MessagePacket*)packet->m_message;
-    if (!msg->validate(packet->m_length)) {
+    MessagePacket* msg = (MessagePacket*)packet->message();
+    if (!msg->validate(packet->length())) {
       fprintf(stderr, "Invalid message packet received\n");
       return nullptr;
     }

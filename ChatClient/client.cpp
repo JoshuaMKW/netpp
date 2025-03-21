@@ -97,8 +97,8 @@ int main(int argc, char** argv) {
     });
 
   client.on_raw_receive([&](const ISocketPipe* source, const RawPacket* packet) {
-    MessagePacket* msg = (MessagePacket*)packet->m_message;
-    if (!msg->validate(packet->m_length)) {
+    MessagePacket* msg = (MessagePacket*)packet->message();
+    if (!msg->validate(packet->length())) {
       return nullptr;
     }
 

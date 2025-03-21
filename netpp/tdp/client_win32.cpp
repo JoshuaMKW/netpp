@@ -27,7 +27,7 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(uint32_t desired_bufsize) {
+  TCP_Client::TCP_Client(uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
     m_error = EClientError::E_NONE;
     m_reason = -1;
 
@@ -284,7 +284,7 @@ namespace netpp {
     //       If so, what does that look like?
     IApplicationLayerAdapter* adapter_ctx = nullptr;
     char* final_buf = nullptr, *proc_buf = nullptr;
-    size_t final_buf_size = 0, proc_buf_size = 0;
+    uint32_t final_buf_size = 0, proc_buf_size = 0;
     bool inproc = false;
 
     while (client->is_running()) {
@@ -372,7 +372,7 @@ namespace netpp {
         adapter = ApplicationAdapterFactory::detect(proc_out, info.m_bytes_transferred);
         data.m_recv_state.m_bytes_total = adapter->calc_size(proc_out, info.m_bytes_transferred);
       }
-      delete proc_out;
+      delete[] proc_out;
     }
 
     inproc = false;

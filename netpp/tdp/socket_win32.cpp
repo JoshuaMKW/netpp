@@ -80,7 +80,7 @@ namespace netpp {
 
   void TCP_Socket::clone_callbacks_from(ISocketPipe* other) {
     TCP_Socket* tcp = static_cast<TCP_Socket*>(other);
-    //m_socket_layer->clone_callbacks_from(tcp->m_socket_layer);
+    m_socket_layer->clone_callbacks_from(tcp->m_socket_layer);
     m_signal_dns_request = tcp->m_signal_dns_request;
     m_signal_dns_response = tcp->m_signal_dns_response;
     m_signal_http_request = tcp->m_signal_http_request;

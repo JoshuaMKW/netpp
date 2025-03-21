@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "netpp.h"
 #include "allocator.h"
 #include "network.h"
 #include "response.h"
@@ -22,7 +23,7 @@ enum class EServerError {
 
 const char* server_error(EServerError error, int reason);
 
-class IServer {
+class NETPP_API IServer {
 public:
   virtual ~IServer() = default;
 
@@ -67,9 +68,10 @@ protected:
   virtual void emit_error(ISocketPipe* pipe, EServerError error, int reason) = 0;
 };
 
-class TCP_Server final : public IServer {
+class NETPP_API TCP_Server final : public IServer {
 public:
-  TCP_Server(uint32_t desired_bufsize = 0, uint32_t bufcount = 128, int worker_threads = -1);
+  TCP_Server() = delete;
+  TCP_Server(bool use_tls_ssl, uint32_t desired_bufsize = 0, uint32_t bufcount = 128, int max_threads = -1);
   ~TCP_Server();
 
   bool is_running() const override;
@@ -161,6 +163,8 @@ private:
 
   std::mutex m_mutex;
   bool m_stop_flag;
+
+  bool m_tls_ssl;
 };
 
 } // namespace netpp

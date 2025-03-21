@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "netpp.h"
+
 namespace netpp {
 
   enum class EHTTP_RequestMethod {
@@ -20,7 +22,7 @@ namespace netpp {
 
   const char* http_request_str(EHTTP_RequestMethod method);
 
-  class HTTP_Request {
+  class NETPP_API HTTP_Request {
   public:
     static bool is_http_request(const char* http_buf, uint32_t buflen);
     static HTTP_Request* create(EHTTP_RequestMethod type);
