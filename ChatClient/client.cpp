@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
   printf("Enter your name: ");
   std::getline(std::cin, client_name);
 
-  TCP_Client client;
+  TCP_Client client(true);
   InputHandler msg_handler(client_name);
 
   bool sent_message = false;

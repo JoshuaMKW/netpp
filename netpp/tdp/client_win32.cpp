@@ -27,7 +27,9 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
+  TCP_Client::TCP_Client(bool use_tls_ssl, uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
+    m_tls_ssl = use_tls_ssl;
+
     m_error = EClientError::E_NONE;
     m_reason = -1;
 
@@ -68,7 +70,14 @@ namespace netpp {
 
     m_startup_thread = std::this_thread::get_id();
 
-    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
+    ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
+    if (m_tls_ssl) {
+      m_server_socket.m_pipe = new TLS_SocketProxy(pipe);
+    }
+    else {
+      m_server_socket.m_pipe = pipe;
+    }
+
     m_server_socket.m_recv_state = { nullptr, 0, 0 };
     m_server_socket.m_send_state = { nullptr, 0, 0 };
 

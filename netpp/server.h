@@ -140,6 +140,7 @@ private:
   StaticBlockAllocator m_send_allocator;
   SocketData m_server_socket;
 
+  std::unordered_map<uint64_t, SocketData> m_pending_auth_sockets;
   std::unordered_map<uint64_t, SocketData> m_client_sockets;
   std::unordered_map<uint64_t, std::thread> m_socket_threads;
 

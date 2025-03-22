@@ -308,6 +308,9 @@ namespace netpp {
   }
 
   ISocketPipe* TCP_Server::get_socket_pipe(uint64_t socket) {
+    if (m_client_sockets.find(socket) == m_client_sockets.end()) {
+      return nullptr;
+    }
     return m_client_sockets[socket].m_pipe;
   }
 
@@ -331,16 +334,18 @@ namespace netpp {
         adapter = ApplicationAdapterFactory::detect(proc_out, info.m_bytes_transferred);
         data.m_recv_state.m_bytes_total = adapter->calc_size(proc_out, info.m_bytes_transferred);
       }
-      delete proc_out;
+      delete[] proc_out;
     }
 
     uint32_t flags = 0;
     if (data.m_recv_state.m_bytes_total == 0) {
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;
       pipe->recv(0, &flags, &transferred);
       inproc = true;
     }
     else if (data.m_recv_state.m_bytes_sent < data.m_recv_state.m_bytes_total) {
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;
       pipe->recv(0, &flags, &transferred);
       inproc = true;
@@ -365,9 +370,16 @@ namespace netpp {
       client_pipe->open(socket);
       client_pipe->clone_callbacks_from(m_server_socket.m_pipe);
 
-      m_client_sockets[socket] = {
-        client_pipe, {0, 0}
-      };
+      if (m_tls_ssl) {
+        m_pending_auth_sockets[socket] = {
+          client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, true
+        };
+      }
+      else {
+        m_client_sockets[socket] = {
+          client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, false
+        };
+      }
     }
   }
 
@@ -394,7 +406,28 @@ namespace netpp {
     while (server->is_running()) {
       bool success = server->m_server_socket.m_pipe->accept(nullptr, [server](uint64_t socket) {
         std::unique_lock<std::mutex> lock(server->m_mutex);
-        server->m_awaiting_sockets.push(socket);
+
+        ISocketPipe* client_pipe = new TCP_Socket(
+          server->m_server_socket.m_pipe->get_os_layer(), &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
+
+        if (server->m_tls_ssl) {
+          client_pipe = new TLS_SocketProxy(client_pipe);
+        }
+
+        client_pipe->open(socket);
+        client_pipe->clone_callbacks_from(server->m_server_socket.m_pipe);
+
+        if (server->m_tls_ssl) {
+          server->m_pending_auth_sockets[socket] = {
+            client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, true
+          };
+        }
+        else {
+          server->m_client_sockets[socket] = {
+            client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, false
+          };
+        }
+
         return true;
         });
     }
@@ -436,8 +469,11 @@ namespace netpp {
       std::unique_lock<std::mutex> lock(server->m_mutex);
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+        if (server->m_client_sockets.find(pipe->socket()) == server->m_client_sockets.end()) {
+          return false;
+        }
+
         SocketData& sock_data = server->m_client_sockets[pipe->socket()];
-        pipe->set_busy(info.m_operation, false);
 
         switch (info.m_operation) {
         case EPipeOperation::E_RECV: {
@@ -450,6 +486,8 @@ namespace netpp {
           }
 
           if (!inproc) {
+            pipe->set_transferred(EPipeOperation::E_RECV, sock_data.m_recv_state.m_bytes_sent);
+            pipe->set_busy(info.m_operation, false);
             if (!adapter->on_receive(sock_data.m_pipe, pipe->recv_buf(), sock_data.m_recv_state.m_bytes_sent, 0)) {
               pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
               sock_data.m_recv_state = { nullptr, 0, 0 };
@@ -463,6 +501,9 @@ namespace netpp {
         case EPipeOperation::E_SEND: {
           // Check if the send is incomplete (chunking the data)
           sock_data.m_send_state.m_bytes_sent += info.m_bytes_transferred;
+
+          pipe->set_transferred(EPipeOperation::E_SEND, sock_data.m_send_state.m_bytes_sent);
+          pipe->set_busy(EPipeOperation::E_SEND, false);
 
           const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_sent;
           if (bytes_left > 0) {

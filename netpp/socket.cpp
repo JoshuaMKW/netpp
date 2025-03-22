@@ -322,6 +322,8 @@ namespace netpp {
       return m_protocol;
     }
 
+    bool is_server() const { return false; }
+
     bool is_ready(EPipeOperation op) const override { return m_connected && !is_busy(op); }
 
     bool is_busy(EPipeOperation op) const override {
@@ -480,16 +482,16 @@ namespace netpp {
       return true;
     }
 
-    bool sync(uint64_t wait_time) override {
+    int64_t sync(EPipeOperation op, uint64_t wait_time) override {
       if (wait_time == 0) {
-        while (is_busy(EPipeOperation::E_RECV_SEND)) {
+        while (is_busy(op)) {
           std::this_thread::sleep_for(10ms);
         }
-        return true;
+        return get_transferred(op);
       }
 
       time_point<high_resolution_clock> start_time = high_resolution_clock::now();
-      while (is_busy(EPipeOperation::E_RECV_SEND)) {
+      while (is_busy(op)) {
         time_point<high_resolution_clock> now_time = high_resolution_clock::now();
         if ((now_time - start_time).count() > (int64_t)wait_time) {
           return false;
@@ -497,7 +499,7 @@ namespace netpp {
         std::this_thread::sleep_for(10ms);
       }
 
-      return true;
+      return get_transferred(op);
     }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
@@ -683,10 +685,12 @@ namespace netpp {
       *transferred_out = ::recv(m_socket, m_recv_buffer->buf + offset, recv_buf_size() - offset, flags_);
       int rc = WSAGetLastError();
       if (*transferred_out == 0) {
+        set_transferred(EPipeOperation::E_RECV, -1);
         error(ESocketErrorReason::E_REASON_PORT);
         return false;
       }
       else if (*(int*)transferred_out == INVALID_SOCKET) {
+        set_transferred(EPipeOperation::E_RECV, -1);
         error(ESocketErrorReason::E_REASON_SOCKET);
         return false;
       }
@@ -725,9 +729,11 @@ namespace netpp {
       case ETransportLayerProtocol::E_TCP: {
         int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
         if (rc == SOCKET_ERROR) {
+          set_transferred(EPipeOperation::E_SEND, -1);
           error(ESocketErrorReason::E_REASON_SEND);
           return false;
         }
+        set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
         return true;
       }
       case ETransportLayerProtocol::E_UDP: {
@@ -741,9 +747,11 @@ namespace netpp {
 
         int rc = ::sendto(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_, (sockaddr*)&server_addr, sizeof(sockaddr));
         if (rc == SOCKET_ERROR) {
+          set_transferred(EPipeOperation::E_SEND, -1);
           error(ESocketErrorReason::E_REASON_SEND);
           return false;
         }
+        set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
         return true;
       }
       }
@@ -771,6 +779,30 @@ namespace netpp {
     void set_recv_buf_size(uint32_t size) override {}
     void set_send_buf(const char* buf) override {}
     void set_send_buf_size(uint32_t size) override {}
+
+    int64_t get_transferred(EPipeOperation op) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        return m_recv_transferred;
+      case EPipeOperation::E_SEND:
+        return m_send_transferred;
+      default:
+        return 0;
+      }
+    }
+
+    void set_transferred(EPipeOperation op, int64_t transferred) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        m_recv_transferred = transferred;
+        break;
+      case EPipeOperation::E_SEND:
+        m_send_transferred = transferred;
+        break;
+      default:
+        break;
+      }
+    }
 
     ISocketIOResult* wait_results() override {
       return new Win32ClientSocketIOResult(this, m_iocp);
@@ -811,6 +843,7 @@ namespace netpp {
     Tag_WSA_OVERLAPPED* m_send_overlapped;
 
     uint32_t m_recv_transferred;
+    uint32_t m_send_transferred;
 
     LPFN_DISCONNECTEX DisconnectEx;
 
@@ -943,6 +976,8 @@ namespace netpp {
     ETransportLayerProtocol protocol() const override {
       return m_protocol;
     }
+
+    bool is_server() const { return true; }
 
     bool is_ready(EPipeOperation op) const override { return !is_busy(op); }
 
@@ -1159,16 +1194,16 @@ namespace netpp {
       return true;
     }
 
-    bool sync(uint64_t wait_time) override {
+    int64_t sync(EPipeOperation op, uint64_t wait_time) override {
       if (wait_time == 0) {
-        while (is_busy(EPipeOperation::E_RECV_SEND)) {
+        while (is_busy(op)) {
           std::this_thread::sleep_for(10ms);
         }
-        return true;
+        return get_transferred(op);
       }
 
       time_point<high_resolution_clock> start_time = high_resolution_clock::now();
-      while (is_busy(EPipeOperation::E_RECV_SEND)) {
+      while (is_busy(op)) {
         time_point<high_resolution_clock> now_time = high_resolution_clock::now();
         if ((now_time - start_time).count() > (int64_t)wait_time) {
           return false;
@@ -1176,7 +1211,7 @@ namespace netpp {
         std::this_thread::sleep_for(10ms);
       }
 
-      return true;
+      return get_transferred(op);
     }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
@@ -1298,6 +1333,30 @@ namespace netpp {
     void set_send_buf(const char* buf) override {}
     void set_send_buf_size(uint32_t size) override {}
 
+    int64_t get_transferred(EPipeOperation op) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        return m_recv_transferred;
+      case EPipeOperation::E_SEND:
+        return m_send_transferred;
+      default:
+        return 0;
+      }
+    }
+
+    void set_transferred(EPipeOperation op, int64_t transferred) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        m_recv_transferred = transferred;
+        break;
+      case EPipeOperation::E_SEND:
+        m_send_transferred = transferred;
+        break;
+      default:
+        break;
+      }
+    }
+
     ISocketIOResult* wait_results() override {
       return new Win32ServerSocketIOResult(m_iocp, m_completion_queue, 32);
     }
@@ -1331,6 +1390,9 @@ namespace netpp {
 
     uint32_t m_send_buf_block;
     Tag_RIO_BUF* m_send_buffer;
+
+    uint32_t m_recv_transferred;
+    uint32_t m_send_transferred;
 
     RIO_CQ m_completion_queue;
     RIO_RQ m_request_queue;

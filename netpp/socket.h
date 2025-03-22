@@ -130,8 +130,8 @@ namespace netpp {
     virtual uint64_t socket() const = 0;
     virtual ETransportLayerProtocol protocol() const = 0;
 
+    virtual bool is_server() const = 0;
     virtual bool is_ready(EPipeOperation op) const = 0;
-
     virtual bool is_busy(EPipeOperation op) const = 0;
     virtual void set_busy(EPipeOperation op, bool busy) = 0;
 
@@ -143,7 +143,8 @@ namespace netpp {
 
     virtual bool notify_all() = 0;
 
-    virtual bool sync(uint64_t wait_time = 0) = 0;
+    // Return value is how many bytes were transferred or -1 on error.
+    virtual int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
@@ -168,6 +169,10 @@ namespace netpp {
     virtual void set_send_buf(const char* buf) = 0;
     virtual void set_send_buf_size(uint32_t size) = 0;
 
+    // Use to signal to sync() how much transferred.
+    virtual int64_t get_transferred(EPipeOperation op) = 0;
+    virtual void set_transferred(EPipeOperation op, int64_t transferred) = 0;
+
     virtual ISocketIOResult* wait_results() = 0;
 
     virtual void* sys_data() const = 0;
@@ -188,8 +193,6 @@ namespace netpp {
       ETransportLayerProtocol protocol, ESocketHint hint);
     static bool deinitialize();
   };
-
-  class IServer;
 
   class NETPP_API ISocketPipe {
   public:
@@ -215,6 +218,7 @@ namespace netpp {
     virtual const std::string& hostname() const = 0;
     virtual const std::string& port() const = 0;
 
+    virtual bool is_server() const = 0;
     virtual bool is_ready(EPipeOperation op) const = 0;
     virtual bool is_busy(EPipeOperation op) const = 0;
 
@@ -227,7 +231,8 @@ namespace netpp {
 
     // Not recommended, only use if absolutely necessary.
     // Favor async programming instead.
-    virtual bool sync(uint64_t wait_time = 0) = 0;
+    // Return value is how many bytes were transferred or -1 on error.
+    virtual int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
@@ -244,8 +249,6 @@ namespace netpp {
 
     // Application surrenders ownership of the buffer
     virtual bool send(const RawPacket* packet) = 0;
-
-    virtual bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
 
     virtual void on_close(close_cb cb) = 0;
     virtual void on_error(error_cb cb) = 0;
@@ -275,6 +278,8 @@ namespace netpp {
     virtual void* sys_data() const = 0;
     virtual void* user_data() const = 0;
 
+    virtual bool proc_pending_auth() = 0;
+    virtual bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
 
     static inline bool is_ping_packet(const char* buf, size_t size) {
@@ -292,6 +297,7 @@ namespace netpp {
     ISocketPipe* m_pipe;
     SocketIOState m_recv_state;
     SocketIOState m_send_state;
+    bool m_proc_handshake;
   };
 
   /// <summary>
@@ -309,6 +315,7 @@ namespace netpp {
     const std::string& hostname() const override { return m_host_name; }
     const std::string& port() const override { return m_port; }
 
+    bool is_server() const override { return m_socket_layer->is_server(); }
     bool is_ready(EPipeOperation op) const override { return m_socket_layer->is_ready(op); }
     bool is_busy(EPipeOperation op) const override { return m_socket_layer->is_busy(op); }
 
@@ -320,7 +327,7 @@ namespace netpp {
 
     bool notify_all() override { return m_socket_layer->notify_all(); }
 
-    bool sync(uint64_t wait_time = 0) override { return m_socket_layer->sync(); }
+    int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_socket_layer->sync(op, wait_time); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
       return m_socket_layer->accept(accept_cond, accept_routine);
@@ -345,11 +352,6 @@ namespace netpp {
 
     // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
-
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
-      memcpy_s(out_data, out_size, in_data, in_size);
-      return true;
-    }
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
@@ -390,6 +392,11 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
+    bool proc_pending_auth() override { return true; }
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+      memcpy_s(out_data, out_size, in_data, in_size);
+      return true;
+    }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
   private:
@@ -430,6 +437,7 @@ namespace netpp {
     const std::string& hostname() const override { return m_host_name; }
     const std::string& port() const override { return m_port; }
 
+    bool is_server() const override { return m_socket_layer->is_server(); }
     bool is_ready(EPipeOperation op) const override { return m_socket_layer->is_ready(op); }
     bool is_busy(EPipeOperation op) const override { return m_socket_layer->is_busy(op); }
 
@@ -439,7 +447,7 @@ namespace netpp {
 
     bool notify_all() override { return m_socket_layer->notify_all(); }
 
-    bool sync(uint64_t wait_time = 0) override { return m_socket_layer->sync(); }
+    int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_socket_layer->sync(op, wait_time); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
       return m_socket_layer->accept(accept_cond, accept_routine);
@@ -464,11 +472,6 @@ namespace netpp {
 
     // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
-
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
-      memcpy_s(out_data, out_size, in_data, in_size);
-      return true;
-    }
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
@@ -507,6 +510,12 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
+  protected:
+    bool proc_pending_auth() override { return true; }
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+      memcpy_s(out_data, out_size, in_data, in_size);
+      return true;
+    }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
   private:
@@ -551,6 +560,7 @@ namespace netpp {
     const std::string& hostname() const override { return m_pipe->hostname(); }
     const std::string& port() const override { return m_pipe->port(); }
 
+    bool is_server() const override { return m_pipe->is_server(); }
     bool is_ready(EPipeOperation op) const override { return m_pipe->is_ready(op); }
     bool is_busy(EPipeOperation op) const override { return m_pipe->is_busy(op); }
 
@@ -562,7 +572,7 @@ namespace netpp {
 
     bool notify_all() override { return m_pipe->notify_all(); }
 
-    bool sync(uint64_t wait_time = 0) override { return m_pipe->sync(); }
+    int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_pipe->sync(op, wait_time); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
@@ -584,8 +594,6 @@ namespace netpp {
 
     // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
-
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
 
     void on_close(close_cb cb) override { m_pipe->on_close(cb); }
     void on_error(error_cb cb) override { m_pipe->on_error(cb); }
@@ -615,9 +623,10 @@ namespace netpp {
     void* sys_data() const override { return m_pipe->sys_data(); }
     void* user_data() const override { return m_pipe->user_data(); }
 
+    bool proc_pending_auth() override;
+    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
     ISocketOSSupportLayer* get_os_layer() const { return m_pipe->get_os_layer(); }
 
-  protected:
     /*
     Suite of protocols used in the TLS handshake
 
@@ -631,7 +640,7 @@ namespace netpp {
     bool send_server_hello();
 
     bool send_server_certificate();
-    
+
     bool send_client_key_exchange();
 
     bool recv_change_cipher_spec();
@@ -640,11 +649,16 @@ namespace netpp {
     bool send_finished();
     bool recv_finished();
 
+    bool SSL_handshake_routine();
+
   private:
     ISocketPipe* m_pipe;
     uint8_t m_aes_key[key_size] = {};
     SSL_CTX* m_tls_ctx;
     SSL* m_ssl;
+    BIO* m_in_bio;
+    BIO* m_out_bio;
+    bool m_other_done;
   };
 
   bool sockets_initialize();
