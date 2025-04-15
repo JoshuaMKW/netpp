@@ -22,7 +22,7 @@ using namespace std::chrono_literals;
 
 #define SKIP_BUF_INIT_FLAG 0x80000000
 
-#define CLIENT_USE_WSA false
+#define CLIENT_USE_WSA true
 
 struct _WrapperState {
   netpp::ISocketOSSupportLayer* m_pipe = nullptr;
@@ -32,7 +32,7 @@ struct _WrapperState {
 static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
   LPQOS sqos, LPQOS gqos, LPWSABUF callee_id,
   LPWSABUF callee_data, GROUP FAR* g, DWORD_PTR callback_data) {
-  _WrapperState *state = reinterpret_cast<_WrapperState*>(callback_data);
+  _WrapperState* state = reinterpret_cast<_WrapperState*>(callback_data);
 
   if (state->m_cond == nullptr) {
     return CF_ACCEPT;
@@ -229,12 +229,13 @@ namespace netpp {
 
   class Win32ClientSocketIOResult : public ISocketIOResult {
   public:
-    Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, HANDLE iocp) : m_pipe(pipe) {
-      DWORD transferred_;
+    Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, LPWSAOVERLAPPED recv_overlapped, LPWSAOVERLAPPED send_overlapped)
+      : m_pipe(pipe), m_recv_bytes(0), m_send_bytes(0) {
+      DWORD transferred_, flags_;
       ULONG_PTR completion_key;
-      LPOVERLAPPED overlapped;
 
 #ifdef CLIENT_USE_WSA
+#if 0
       bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
       if (!success) {
         return;
@@ -243,6 +244,19 @@ namespace netpp {
       if (completion_key == (DWORD)ECompletionKey::E_STOP) {
         return;
       }
+#else
+      bool success = WSAGetOverlappedResult(pipe->socket(), recv_overlapped, &transferred_, false, &flags_);
+      if (success) {
+        m_recv_bytes = transferred_;
+        ZeroMemory(recv_overlapped, sizeof(WSAOVERLAPPED));
+      }
+
+      success = WSAGetOverlappedResult(pipe->socket(), send_overlapped, &transferred_, false, &flags_);
+      if (success) {
+        m_send_bytes = transferred_;
+        ZeroMemory(send_overlapped, sizeof(WSAOVERLAPPED));
+      }
+#endif
 #endif
     }
 
@@ -257,11 +271,19 @@ namespace netpp {
         return false;
       }
 
-      return cb(m_pipe, { EPipeOperation::E_RECV, 0 });
+      if (m_recv_bytes > 0) {
+        cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
+      }
+
+      if (m_send_bytes > 0) {
+        cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
+      }
     }
 
   private:
     ISocketOSSupportLayer* m_pipe;
+    uint32_t m_recv_bytes;
+    uint32_t m_send_bytes;
   };
 
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
@@ -270,7 +292,7 @@ namespace netpp {
       StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
       : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
       m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK),
-      m_recv_busy(false), m_send_busy(false), m_recv_transferred(0) {
+      m_recv_transferred(0), m_send_transferred(0) {
       m_socket = INVALID_SOCKET;
       m_recv_buffer = new Tag_WSA_BUF{
         nullptr,
@@ -285,12 +307,12 @@ namespace netpp {
         this
       };
       m_recv_overlapped = new Tag_WSA_OVERLAPPED{
-        m_send_buffer,
+        m_recv_buffer,
         EPipeOperation::E_RECV,
         this
       };
       m_send_overlapped = new Tag_WSA_OVERLAPPED{
-        m_recv_buffer,
+        m_send_buffer,
         EPipeOperation::E_SEND,
         this
       };
@@ -331,11 +353,11 @@ namespace netpp {
       case EPipeOperation::E_NONE:
         return false;
       case EPipeOperation::E_RECV:
-        return m_recv_busy;
+        return m_recv_buffer->IsBusy;
       case EPipeOperation::E_SEND:
-        return m_send_busy;
+        return m_send_buffer->IsBusy;
       case EPipeOperation::E_RECV_SEND:
-        return m_recv_busy || m_send_busy;
+        return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
       }
       return false;
     }
@@ -343,14 +365,14 @@ namespace netpp {
     void set_busy(EPipeOperation op, bool busy) override {
       switch (op) {
       case EPipeOperation::E_RECV:
-        m_recv_busy = busy;
+        m_recv_buffer->IsBusy = busy;
         return;
       case EPipeOperation::E_SEND:
-        m_send_busy = busy;
+        m_send_buffer->IsBusy = busy;
         return;
       case EPipeOperation::E_RECV_SEND:
-        m_recv_busy = busy;
-        m_send_busy = busy;
+        m_recv_buffer->IsBusy = busy;
+        m_send_buffer->IsBusy = busy;
         return;
       }
       return;
@@ -378,7 +400,7 @@ namespace netpp {
 
       uint64_t socket_ = INVALID_SOCKET;
 
-#if CLIENT_USE_WSA
+#if !CLIENT_USE_WSA
       // -----------------------------
       // Create the socket and flag it for IOCP
 
@@ -502,6 +524,10 @@ namespace netpp {
       return get_transferred(op);
     }
 
+    SocketLock acquire_lock() override {
+      return SocketLock(m_mutex);
+    }
+
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
       return false;
     }
@@ -518,8 +544,8 @@ namespace netpp {
 #if CLIENT_USE_WSA
       // Check if the connection is still alive
       uint32_t flags = MSG_PEEK;
-      BOOL rc = ::WSARecv(m_socket, m_recv_buffer, 1, NULL, (LPDWORD)&flags, m_recv_overlapped, NULL);
-      if (rc > 0) {
+      int rc = ::WSARecv(m_socket, m_recv_buffer, 1, NULL, (LPDWORD)&flags, m_recv_overlapped, NULL);
+      if (rc == 0) {
         return true;
       }
       else {
@@ -556,13 +582,13 @@ namespace netpp {
 
       std::atomic<bool> time_out(false);
 
-      auto future = std::async(std::launch::async, [&time_out](SOCKET socket, sockaddr* addr, size_t addr_size) {
+      auto future = std::async(std::launch::async, [&](SOCKET socket, sockaddr* addr, size_t addr_size) {
 #if CLIENT_USE_WSA
         QOS qos;
         ZeroMemory(&qos, sizeof(qos));
 
         bool custom_flowspec = recv_flowspec && send_flowspec;
-        if (recv_flowspec && send_flowspec) {
+        if (custom_flowspec) {
           qos.SendingFlowspec.DelayVariation = send_flowspec->m_jitter_tolerance;
           qos.SendingFlowspec.ServiceType = (int)send_flowspec->m_service_type;
           qos.SendingFlowspec.TokenRate = send_flowspec->m_token_rate;
@@ -587,14 +613,15 @@ namespace netpp {
 
         while (true) {
 #if CLIENT_USE_WSA
-          if (::WSAConnect(server_pipe->socket(), result->ai_addr, (int)result->ai_addrlen, NULL, NULL, custom_flowspec ? &qos : NULL, NULL) == SOCKET_ERROR) {
+          int conn = ::WSAConnect(socket, addr, (int)addr_size, NULL, NULL, custom_flowspec ? &qos : NULL, NULL);
+          if (conn == SOCKET_ERROR) {
             int rc = ::WSAGetLastError();
             if (rc == WSAEISCONN) {
               return true;
             }
             else {
               if (rc != WSAEWOULDBLOCK && rc != WSAECONNREFUSED) {
-                client->emit_error(nullptr, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_LISTEN);
+                error(ESocketErrorReason::E_REASON_LISTEN);
               }
               // Error connecting to the server (server is down?)
               if (time_out) {
@@ -607,7 +634,7 @@ namespace netpp {
 
             fd_set write_set;
             FD_ZERO(&write_set);
-            FD_SET(server_pipe->socket(), &write_set);
+            FD_SET(socket, &write_set);
 
             // Check for connection completion
             timeval timeout = { 2, 0 };
@@ -622,7 +649,7 @@ namespace netpp {
 
             int error = 0;
             int error_size = sizeof(error);
-            if (::getsockopt(server_pipe->socket(), SOL_SOCKET, SO_ERROR, (char*)&error, &error_size) == 0) {
+            if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, (char*)&error, &error_size) == 0) {
               if (time_out) {
                 return false;
               }
@@ -667,21 +694,23 @@ namespace netpp {
         return false;
       }
 
+      uint32_t flags_ = flags ? *flags : 0;
+
 #if CLIENT_USE_WSA
-      bool rc = ::WSARecv(m_socket, m_recv_buffer, 1, NULL, (LPDWORD)flags, m_recv_overlapped, NULL);
-      if (!rc) {
+      int rc = ::WSARecv(m_socket, m_recv_buffer, 1, (LPDWORD)transferred_out, (LPDWORD)&flags_, m_recv_overlapped, NULL);
+      if (rc != 0) {
         int err = ::WSAGetLastError();
         if (err == WSA_IO_PENDING) {
           m_recv_buffer->IsBusy = TRUE;
         }
         else if (err != 0) {
+          set_transferred(EPipeOperation::E_RECV, -1);
           error(ESocketErrorReason::E_REASON_SEND);
           return false;
         }
       }
       return true;
 #else
-      int flags_ = flags ? *flags : 0;
       *transferred_out = ::recv(m_socket, m_recv_buffer->buf + offset, recv_buf_size() - offset, flags_);
       int rc = WSAGetLastError();
       if (*transferred_out == 0) {
@@ -712,8 +741,8 @@ namespace netpp {
       uint32_t flags_ = flags ? *flags : 0;
 
 #if CLIENT_USE_WSA
-      bool rc = WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
-      if (!rc) {
+      int rc = ::WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
+      if (rc != 0) {
         int err = ::WSAGetLastError();
         if (err == WSA_IO_PENDING) {
           m_send_buffer->IsBusy = TRUE;
@@ -805,7 +834,7 @@ namespace netpp {
     }
 
     ISocketIOResult* wait_results() override {
-      return new Win32ClientSocketIOResult(this, m_iocp);
+      return new Win32ClientSocketIOResult(this, m_recv_overlapped, m_send_overlapped);
     }
 
     void* sys_data() const override { return m_iocp; }
@@ -845,14 +874,15 @@ namespace netpp {
     uint32_t m_recv_transferred;
     uint32_t m_send_transferred;
 
+    LPFN_CONNECTEX ConnectEx;
     LPFN_DISCONNECTEX DisconnectEx;
 
     std::atomic<bool> m_connected;
     std::atomic<bool> m_connecting;
-    std::atomic<bool> m_recv_busy;
-    std::atomic<bool> m_send_busy;
 
     ETransportLayerProtocol m_protocol;
+
+    std::mutex m_mutex;
   };
 
   struct Tag_RIO_BUF : public RIO_BUF {
@@ -1214,6 +1244,10 @@ namespace netpp {
       return get_transferred(op);
     }
 
+    SocketLock acquire_lock() override {
+      return SocketLock(m_mutex);
+    }
+
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
       sockaddr_in inaddr;
       int addr_size = sizeof(sockaddr);
@@ -1400,6 +1434,8 @@ namespace netpp {
     OVERLAPPED m_overlapped;
 
     ETransportLayerProtocol m_protocol;
+
+    std::mutex m_mutex;
   };
 
   bool SocketOSSupportLayerFactory::initialize(uint64_t socket) {

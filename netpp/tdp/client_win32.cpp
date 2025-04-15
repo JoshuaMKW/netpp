@@ -27,7 +27,7 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(bool use_tls_ssl, uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
+  TCP_Client::TCP_Client(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
     m_tls_ssl = use_tls_ssl;
 
     m_error = EClientError::E_NONE;
@@ -72,7 +72,7 @@ namespace netpp {
 
     ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
     if (m_tls_ssl) {
-      m_server_socket.m_pipe = new TLS_SocketProxy(pipe);
+      m_server_socket.m_pipe = new TLS_SocketProxy(pipe, key_file, cert_file);
     }
     else {
       m_server_socket.m_pipe = pipe;
@@ -218,14 +218,14 @@ namespace netpp {
 
     if (pipe) {
       if (pipe == m_server_socket.m_pipe) {
-        fprintf(stderr, "[SERVER] ERROR: Port %s:%s (SERVER) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), error_str);
+        fprintf(stderr, "[CLIENT] ERROR: Port %s:%s (SERVER) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), error_str);
       }
       else {
-        fprintf(stderr, "[SERVER] ERROR: Port %s:%s (CLIENT: %llu) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), pipe->socket(), error_str);
+        fprintf(stderr, "[CLIENT] ERROR: Port %s:%s (CLIENT: %llu) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), pipe->socket(), error_str);
       }
     }
     else {
-      fprintf(stderr, "[SERVER] ERROR: Client (PROCESS) failed with reason: %s\n", error_str);
+      fprintf(stderr, "[CLIENT] ERROR: Client (PROCESS) failed with reason: %s\n", error_str);
     }
   }
 
@@ -302,10 +302,6 @@ namespace netpp {
         continue;
       }
 
-      uint32_t flags = 0;
-      uint32_t transferred;
-      server_pipe->recv(0, &flags, &transferred);
-
       ISocketIOResult* sock_results = server_pipe->wait_results();
       if (!sock_results || !sock_results->is_valid()) {
         server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
@@ -315,15 +311,20 @@ namespace netpp {
       std::unique_lock<std::mutex> lock(client->m_mutex);
 
       sock_results->for_each([&](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
-        ISocketIOResult::OperationData info_cpy = info;
-        info_cpy.m_bytes_transferred = transferred;
-
         uint32_t cur_offset = sock_data.m_recv_state.m_bytes_sent;
         
         pipe->set_busy(info.m_operation, false);
 
+        if (client->m_tls_ssl && !client->m_handshake_done) {
+          return client->handle_auth_operations(sock_data, info);
+        }
+
+        if (info.m_operation != EPipeOperation::E_RECV) {
+          return true;
+        }
+
         bool was_inproc = inproc;
-        IApplicationLayerAdapter* adapter = client->handle_inproc_recv(sock_data, info_cpy, inproc);
+        IApplicationLayerAdapter* adapter = client->handle_inproc_recv(sock_data, info, inproc);
         if (!adapter_ctx && !adapter) {
           pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
           sock_data.m_recv_state = { nullptr, 0, 0 };
@@ -341,7 +342,7 @@ namespace netpp {
           final_buf = new char[final_buf_size];
         }
 
-        memcpy_s(proc_buf + cur_offset, info_cpy.m_bytes_transferred, recv_buf, info_cpy.m_bytes_transferred);
+        memcpy_s(proc_buf + cur_offset, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
 
         // At this point, if the recv is no longer in process, do post processing and signal the receive
         if (!inproc) {
@@ -393,6 +394,39 @@ namespace netpp {
     }
 
     return adapter;
+  }
+  
+  bool TCP_Client::handle_auth_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info) {
+    ISocketPipe* pipe = sock_data.m_pipe;
+
+    switch (info.m_operation) {
+    case EPipeOperation::E_RECV: {
+      sock_data.m_last_op = EPipeOperation::E_RECV;
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+      break;
+    }
+    case EPipeOperation::E_SEND: {
+      sock_data.m_last_op = EPipeOperation::E_SEND;
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_SEND, false);
+      break;
+    }
+    case EPipeOperation::E_CLOSE: {
+      pipe->close();
+      return true;
+    }
+    default:
+      return false;
+    }
+
+    EAuthState auth_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
+    if (auth_state == EAuthState::E_AUTHENTICATED) {
+      m_handshake_done = true;
+    }
+    else if (auth_state == EAuthState::E_FAILED) {
+      pipe->error(ESocketErrorReason::E_REASON_CONNECT);
+      return false;
+    }
+    return true;
   }
 
 }  // namespace netpp

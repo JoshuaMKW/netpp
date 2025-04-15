@@ -86,6 +86,13 @@ namespace netpp {
     E_CLIENT,
   };
 
+  enum class EAuthState {
+    E_FAILED = -1,
+    E_NONE,
+    E_HANDSHAKE,
+    E_AUTHENTICATED,
+  };
+
   class DNS_Request;
   class DNS_Response;
   class HTTP_Request;
@@ -95,6 +102,14 @@ namespace netpp {
   class RTCP_Packet;
   class SIP_Request;
   class SIP_Response;
+
+  class SocketLock {
+  public:
+    SocketLock(std::mutex& mut) : m_lock(mut) {}
+    ~SocketLock() = default;
+
+    std::unique_lock<std::mutex> m_lock;
+  };
 
   class ISocketOSSupportLayer;
 
@@ -145,6 +160,8 @@ namespace netpp {
 
     // Return value is how many bytes were transferred or -1 on error.
     virtual int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) = 0;
+
+    virtual SocketLock acquire_lock() = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
@@ -234,6 +251,8 @@ namespace netpp {
     // Return value is how many bytes were transferred or -1 on error.
     virtual int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) = 0;
 
+    virtual SocketLock acquire_lock() = 0;
+
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
@@ -278,7 +297,7 @@ namespace netpp {
     virtual void* sys_data() const = 0;
     virtual void* user_data() const = 0;
 
-    virtual bool proc_pending_auth() = 0;
+    virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
     virtual bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
 
@@ -288,9 +307,9 @@ namespace netpp {
   };
 
   struct NETPP_API SocketIOState {
-    const char* m_bytes_buf;
-    uint32_t m_bytes_sent;
-    uint32_t m_bytes_total;
+    const char* m_bytes_buf = nullptr;
+    uint32_t m_bytes_sent = 0;
+    uint32_t m_bytes_total = 0;
   };
 
   struct NETPP_API SocketData {
@@ -298,6 +317,7 @@ namespace netpp {
     SocketIOState m_recv_state;
     SocketIOState m_send_state;
     bool m_proc_handshake;
+    EPipeOperation m_last_op;
   };
 
   /// <summary>
@@ -328,6 +348,8 @@ namespace netpp {
     bool notify_all() override { return m_socket_layer->notify_all(); }
 
     int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_socket_layer->sync(op, wait_time); }
+
+    SocketLock acquire_lock() override { return m_socket_layer->acquire_lock(); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
       return m_socket_layer->accept(accept_cond, accept_routine);
@@ -392,7 +414,7 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
-    bool proc_pending_auth() override { return true; }
+    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
     bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
       memcpy_s(out_data, out_size, in_data, in_size);
       return true;
@@ -448,6 +470,8 @@ namespace netpp {
     bool notify_all() override { return m_socket_layer->notify_all(); }
 
     int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_socket_layer->sync(op, wait_time); }
+
+    SocketLock acquire_lock() override { return m_socket_layer->acquire_lock(); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
       return m_socket_layer->accept(accept_cond, accept_routine);
@@ -510,8 +534,7 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
-  protected:
-    bool proc_pending_auth() override { return true; }
+    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
     bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
       memcpy_s(out_data, out_size, in_data, in_size);
       return true;
@@ -552,7 +575,7 @@ namespace netpp {
     inline static const size_t tag_size = 16;  // Auth tag size
     inline static const size_t record_size = 5;  // TLS-record size
 
-    TLS_SocketProxy(ISocketPipe* pipe, uint8_t* aes_key = nullptr);
+    TLS_SocketProxy(ISocketPipe* pipe, const char* key_file, const char* cert_file, const char* passwd = nullptr);
     ~TLS_SocketProxy() override { delete m_pipe; }
 
     uint64_t socket() const override { return m_pipe->socket(); }
@@ -573,6 +596,8 @@ namespace netpp {
     bool notify_all() override { return m_pipe->notify_all(); }
 
     int64_t sync(EPipeOperation op = EPipeOperation::E_RECV_SEND, uint64_t wait_time = 0) override { return m_pipe->sync(op, wait_time); }
+
+    SocketLock acquire_lock() override { return m_pipe->acquire_lock(); }
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
@@ -623,7 +648,7 @@ namespace netpp {
     void* sys_data() const override { return m_pipe->sys_data(); }
     void* user_data() const override { return m_pipe->user_data(); }
 
-    bool proc_pending_auth() override;
+    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
     bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
     ISocketOSSupportLayer* get_os_layer() const { return m_pipe->get_os_layer(); }
 
@@ -649,7 +674,19 @@ namespace netpp {
     bool send_finished();
     bool recv_finished();
 
-    bool SSL_handshake_routine();
+    EAuthState ssl_advance_handshake(EPipeOperation last_op, int32_t post_transferred);
+
+    enum class EProcState {
+      E_FAILED,
+      E_WAITING,
+      E_READY,
+    };
+
+    EProcState handshake_send_state(int32_t post_transferred, int32_t* out_transferring);
+    EProcState handshake_recv_state(int32_t post_transferred);
+
+    bool set_accept_state();
+    bool set_connect_state();
 
   private:
     ISocketPipe* m_pipe;
@@ -658,7 +695,8 @@ namespace netpp {
     SSL* m_ssl;
     BIO* m_in_bio;
     BIO* m_out_bio;
-    bool m_other_done;
+    std::atomic<bool> m_handshake_initiated;
+    std::atomic<EAuthState> m_handshake_state;
   };
 
   bool sockets_initialize();

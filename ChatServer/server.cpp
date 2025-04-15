@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(true);
+  TCP_Server server(true, "./cert/key.pem", "./cert/cert.pem");
 
   std::ofstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt", std::ios_base::app);
   if (!history_file.is_open()) {

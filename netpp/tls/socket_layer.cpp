@@ -1,4 +1,8 @@
 #include <chrono>
+#include <filesystem>
+
+#include <iostream>
+#include <string>
 
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -10,15 +14,94 @@
 
 using namespace std::chrono_literals;
 
+#define NETPP_USE_CERTIFICATES 0
+
+#if NETPP_USE_CERTIFICATES
+#define SERVER_VERIFY_CONFIG SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
+#define CLIENT_VERIFY_CONFIG SSL_VERIFY_PEER
+#else
+#define SERVER_VERIFY_CONFIG SSL_VERIFY_NONE
+#define CLIENT_VERIFY_CONFIG SSL_VERIFY_NONE
+#endif
+
 namespace netpp {
 
-  TLS_SocketProxy::TLS_SocketProxy(ISocketPipe* pipe, uint8_t* aes_key) : m_pipe(pipe) {
-    if (aes_key) {
-      memmove(m_aes_key, aes_key, key_size);
+  TLS_SocketProxy::TLS_SocketProxy(ISocketPipe* pipe, const char* key_file, const char* cert_file, const char* passwd)
+    : m_pipe(pipe), m_handshake_initiated(false), m_handshake_state(EAuthState::E_NONE), m_in_bio(), m_out_bio() {
+    //if (aes_key) {
+    //  memmove(m_aes_key, aes_key, key_size);
+    //}
+
+    if (pipe->is_server()) {
+      m_tls_ctx = SSL_CTX_new(TLS_server_method());
+    }
+    else {
+      m_tls_ctx = SSL_CTX_new(TLS_client_method());
+    }
+    m_ssl = nullptr;
+
+    // Optional: Restrict protocol versions
+    SSL_CTX_set_min_proto_version(m_tls_ctx, TLS1_2_VERSION);
+    SSL_CTX_set_max_proto_version(m_tls_ctx, TLS1_3_VERSION);
+
+    // Set cipher list for TLS 1.2 and below
+    if (!SSL_CTX_set_cipher_list(m_tls_ctx, "ECDHE-RSA-AES128-GCM-SHA256")) {
+      ERR_print_errors_fp(stderr);
+      SSL_CTX_free(m_tls_ctx);
+      m_tls_ctx = nullptr;
+      return;
     }
 
-    m_tls_ctx = SSL_CTX_new(TLS_method());
-    m_ssl = nullptr;
+    // Set cipher suites for TLS 1.3
+    if (!SSL_CTX_set_ciphersuites(m_tls_ctx, "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384")) {
+      ERR_print_errors_fp(stderr);
+      SSL_CTX_free(m_tls_ctx);
+      m_tls_ctx = nullptr;
+      return;
+    }
+
+    if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      SSL_CTX_free(m_tls_ctx);
+      m_tls_ctx = nullptr;
+      return;
+    }
+
+    if (passwd) {
+      SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd);
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
+      ERR_print_errors_fp(stderr);
+      SSL_CTX_free(m_tls_ctx);
+      m_tls_ctx = nullptr;
+      return;
+    }
+
+    if (SSL_CTX_check_private_key(m_tls_ctx) == 0) {
+      ERR_print_errors_fp(stderr);
+      SSL_CTX_free(m_tls_ctx);
+      m_tls_ctx = nullptr;
+      return;
+    }
+
+    if (pipe->is_server()) {
+      SSL_CTX_set_verify(m_tls_ctx, SERVER_VERIFY_CONFIG, NULL);
+
+      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file, NULL) < 1) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return;
+      }
+
+      if (auto* ca_file = SSL_load_client_CA_file(cert_file)) {
+        SSL_CTX_set_client_CA_list(m_tls_ctx, ca_file);
+      }
+    }
+    else {
+      SSL_CTX_set_verify(m_tls_ctx, CLIENT_VERIFY_CONFIG, NULL);
+    }
   }
 
   bool TLS_SocketProxy::open(const char* hostname, const char* port) {
@@ -65,15 +148,12 @@ namespace netpp {
   }
 
   bool TLS_SocketProxy::accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
+    {
+      SocketLock l = acquire_lock();
+      set_accept_state();
+    }
+
     accept_cb SSL_wrapper_routine = [&](uint64_t socket) -> bool {
-      SSL_set_accept_state(m_ssl);
-
-      std::this_thread::sleep_for(100ms);
-
-      if (!SSL_handshake_routine()) {
-        return false;
-      }
-
       return accept_routine(socket);
       };
 
@@ -81,13 +161,30 @@ namespace netpp {
   }
 
   bool TLS_SocketProxy::connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) {
+    {
+      SocketLock l = acquire_lock();
+      set_connect_state();
+    }
+
     bool connected = m_pipe->connect(timeout, recv_flowspec, send_flowspec);
     if (!connected) {
       return false;
     }
 
-    SSL_set_connect_state(m_ssl);
-    return SSL_handshake_routine();
+    // We call handshake here to make sure
+    // the client is what goes first.
+    if (proc_pending_auth(EPipeOperation::E_NONE, 0) == EAuthState::E_FAILED) {
+      return false;
+    }
+
+    while (m_handshake_state != EAuthState::E_AUTHENTICATED) {
+      std::this_thread::sleep_for(16ms);
+      if (m_handshake_state == EAuthState::E_FAILED) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   bool TLS_SocketProxy::ping()
@@ -96,40 +193,13 @@ namespace netpp {
   }
 
   bool TLS_SocketProxy::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
+    if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
+      return false;
+    }
     return m_pipe->recv(offset, flags, transferred_out);
   }
 
   bool TLS_SocketProxy::proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) {
-#if 0
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-
-    uint8_t* tag = (uint8_t*)(in_data + iv_size);
-    uint8_t* iv = (uint8_t*)in_data;
-
-    // Initialize decryption
-    EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL);
-    EVP_DecryptInit_ex(ctx, NULL, NULL, tag, iv);
-
-    uint32_t offset = iv_size + tag_size;
-
-    if (in_size <= offset) {
-      return false;
-    }
-
-    // Cyphertext decryption
-    int _in_s = (int)in_size;
-    int _out_s;
-    EVP_DecryptUpdate(ctx, (uint8_t*)out_data, &_out_s, (uint8_t*)(in_data + offset), in_size - offset);
-
-    // Set the expected auth tag
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, tag_size, tag);
-
-    int ret = EVP_DecryptFinal_ex(ctx, (uint8_t*)(out_data + _out_s), &_out_s);
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    return ret > 0;
-#else
     if (BIO_write(m_in_bio, in_data, in_size) != in_size) {
       return false;
     }
@@ -139,66 +209,48 @@ namespace netpp {
       out_data[bytes] = 0;
       return true;
     }
-#endif
+    else {
+      int ssl_err = SSL_get_error(m_ssl, bytes);
+
+      if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
+        unsigned long err = ERR_get_error();
+        if (err == 0) {
+          fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
+        }
+        else {
+          fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+        }
+      }
+    }
+
+    return false;
   }
 
   // Application surrenders ownership of the buffer
   bool TLS_SocketProxy::send(const char* data, uint32_t size, uint32_t* flags) {
-#if 0
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-
-    uint32_t crypt_size = record_size + iv_size + tag_size + size;
-    uint8_t* crypt_data = new uint8_t[crypt_size];
-    if (!crypt_data) {
+    if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
       return false;
     }
 
-    uint8_t* record_ptr = crypt_data;
-    uint8_t* iv_ptr = crypt_data + record_size;
-    uint8_t* tag_ptr = crypt_data + record_size + iv_size;
-    uint8_t* data_ptr = crypt_data + record_size + iv_size + tag_size;
-
-    // Initialize the iv descriptor
-    RAND_bytes(iv_ptr, iv_size);
-
-    // Encryption initialization
-    EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, m_aes_key, iv_ptr);
-
-    int _in_size = (int)size;
-
-    // Plaintext encryption
-    int out_size;
-    EVP_EncryptUpdate(ctx, data_ptr, &out_size, (uint8_t*)data, size);
-
-    if (crypt_size != out_size + tag_size) {
+    int written = SSL_write(m_ssl, data, size);
+    if (written <= 0) {
+      unsigned long err = ERR_get_error();
+      if (err == 0) {
+        fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
+      }
+      else {
+        fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+      }
       return false;
     }
 
-    // Get auth tag
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, (int)tag_size, tag_ptr);
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    record_ptr[0] = 0x17;  // Content Type: Application Data
-    record_ptr[1] = 0x03;  // TLS Version (Major)
-    record_ptr[2] = 0x03;  // TLS Version (Minor) - TLS 1.2
-    record_ptr[3] = ((crypt_size - record_size) >> 8) & 0xFF;  // Length (High Byte)
-    record_ptr[4] = (crypt_size - record_size) & 0xFF;  // Length (Low Byte)
-
-    m_pipe->send((const char*)crypt_data, crypt_size, flags);
-    return true;
-#else
-    SSL_write(m_ssl, data, size);
-
-    uint32_t crypt_size = record_size + iv_size + tag_size + size;
-    uint8_t* buffer = new uint8_t[crypt_size];
-    int bytes = BIO_read(m_out_bio, buffer, crypt_size);
+    uint8_t* buffer = new uint8_t[written];
+    int bytes = BIO_read(m_out_bio, buffer, written);
     if (bytes > 0) {
       return m_pipe->send((const char*)buffer, bytes, flags);
     }
 
     return false;
-#endif
   }
 
   bool TLS_SocketProxy::send(const HTTP_Request* request) {
@@ -217,18 +269,15 @@ namespace netpp {
     return send(packet->message(), packet->length(), nullptr);
   }
 
-  bool TLS_SocketProxy::proc_pending_auth()
-  {
-      return false;
+  EAuthState TLS_SocketProxy::proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) {
+    return ssl_advance_handshake(last_op, post_transferred);
   }
 
-  bool TLS_SocketProxy::recv_client_hello()
-  {
+  bool TLS_SocketProxy::recv_client_hello() {
     return false;
   }
 
-  bool TLS_SocketProxy::recv_server_hello()
-  {
+  bool TLS_SocketProxy::recv_server_hello() {
     return false;
   }
 
@@ -236,109 +285,97 @@ namespace netpp {
     return false;
   }
 
-  bool TLS_SocketProxy::send_server_hello()
-  {
+  bool TLS_SocketProxy::send_server_hello() {
     return false;
   }
 
-  bool TLS_SocketProxy::send_server_certificate()
-  {
+  bool TLS_SocketProxy::send_server_certificate() {
     return false;
   }
 
-  bool TLS_SocketProxy::send_client_key_exchange()
-  {
+  bool TLS_SocketProxy::send_client_key_exchange() {
     return false;
   }
 
-  bool TLS_SocketProxy::recv_change_cipher_spec()
-  {
+  bool TLS_SocketProxy::recv_change_cipher_spec() {
     return false;
   }
 
-  bool TLS_SocketProxy::send_change_cipher_spec()
-  {
+  bool TLS_SocketProxy::send_change_cipher_spec() {
     return false;
   }
 
-  bool TLS_SocketProxy::send_finished()
-  {
+  bool TLS_SocketProxy::send_finished() {
     return false;
   }
 
-  bool TLS_SocketProxy::recv_finished()
-  {
+  bool TLS_SocketProxy::recv_finished() {
     return false;
   }
 
-  bool TLS_SocketProxy::SSL_handshake_routine() {
-    int result;
+  EAuthState TLS_SocketProxy::ssl_advance_handshake(EPipeOperation last_op, int32_t post_transferred) {
+    int result = 0;
+    int32_t recv_transferred = last_op == EPipeOperation::E_RECV ? post_transferred : 0;
+    int32_t send_transferred = last_op == EPipeOperation::E_SEND ? post_transferred : 0;
 
-    bool initiated = false;
+    SocketLock l = acquire_lock();
 
-    while ((result = SSL_do_handshake(m_ssl)) != 1) {
+    if (SSL_is_init_finished(m_ssl)) {
+      return EAuthState::E_AUTHENTICATED;
+    }
+
+    EProcState proc_state = EProcState::E_READY;
+    bool wants_recv = false;
+    int32_t transferring = 0;
+
+    while (proc_state == EProcState::E_READY) {
+      result = SSL_do_handshake(m_ssl);
+      if (result == 1) {
+        m_handshake_state = EAuthState::E_AUTHENTICATED;
+        return EAuthState::E_AUTHENTICATED;
+      }
+
       int err = SSL_get_error(m_ssl, result);
       if (err == SSL_ERROR_WANT_READ) {
-        if (!initiated) {
-          if (!is_server()) {
-            goto send_ctrl;
+        if (wants_recv) {
+          proc_state = handshake_recv_state(0);
+        } else if (is_server()) {
+          if (!m_handshake_initiated) {
+            proc_state = handshake_recv_state(0);
+          } else if (send_transferred > 0) {
+            proc_state = handshake_recv_state(0);
+          } else if (recv_transferred > 0) {
+            proc_state = handshake_recv_state(recv_transferred);
+          } else {
+            proc_state = handshake_send_state(0, &transferring);
+            wants_recv = transferring > 0;
           }
-          else {
-            goto recv_ctrl;
+        } else {
+          if (!m_handshake_initiated) {
+            proc_state = handshake_recv_state(0);
+            handshake_send_state(0, &transferring);
+          } else if (send_transferred > 0) {
+            proc_state = handshake_recv_state(0);
+          } else if (recv_transferred > 0) {
+            proc_state = handshake_recv_state(recv_transferred);
+          } else {
+            proc_state = handshake_send_state(0, &transferring);
+            wants_recv = transferring > 0;
           }
         }
-
-      recv_ctrl:
-        uint32_t recv_buf_size = get_os_layer()->recv_buf_size();
-        char* socket_buffer = new char[recv_buf_size];
-
-        uint32_t tmp_;
-        if (!m_pipe->recv(0, nullptr, &tmp_)) {
-          return false;
+      } else if (err == SSL_ERROR_WANT_WRITE) {
+        if (is_server()) {
+          proc_state = handshake_send_state(send_transferred, &transferring);
+          wants_recv = transferring > 0;
         }
-
-        int64_t transferred = m_pipe->sync(EPipeOperation::E_RECV);
-        if (transferred <= 0) {
-          fprintf(stderr, "Socket recv failed or connection closed during handshake.\n");
-          return false;
+        else {
+          proc_state = handshake_send_state(send_transferred, &transferring);
+          wants_recv = transferring > 0;
         }
-
-        // Push received TLS data into OpenSSL's read BIO
-        int written = BIO_write(m_in_bio, socket_buffer, transferred);
-        if (written <= 0) {
-          fprintf(stderr, "BIO_write to rbio failed.\n");
-          return false;
-        }
-      }
-      else if (err == SSL_ERROR_WANT_WRITE) {
-      send_ctrl:
-        uint32_t send_buf_size = get_os_layer()->send_buf_size();
-        char* tls_out = new char[send_buf_size];
-        int pending = BIO_ctrl_pending(m_out_bio);
-        while (pending > 0) {
-          int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, send_buf_size));
-          if (bytes_to_send > 0) {
-            if (!m_pipe->send(tls_out, bytes_to_send, nullptr)) {
-              return false;
-            }
-
-            int64_t sent = m_pipe->sync(EPipeOperation::E_SEND);
-            if (sent <= 0) {
-              fprintf(stderr, "Socket send failed during handshake.\n");
-              return false;
-            }
-          }
-          else {
-            fprintf(stderr, "BIO_read from wbio failed.\n");
-            return false;
-          }
-          pending = BIO_ctrl_pending(m_out_bio);
-        }
-      }
-      else {
+      } else {
         int ssl_err = SSL_get_error(m_ssl, result);
 
-        if (ssl_err == SSL_ERROR_SYSCALL) {
+        if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
           unsigned long err = ERR_get_error();
           if (err == 0) {
             fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
@@ -347,32 +384,82 @@ namespace netpp {
             fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
           }
         }
-        return false;
+        m_handshake_state = EAuthState::E_FAILED;
+        return EAuthState::E_FAILED;
+      }
+      m_handshake_initiated = true;
+      recv_transferred = 0;
+      send_transferred = 0;
+      continue;
+    }
+
+    m_handshake_state = proc_state == EProcState::E_FAILED
+      ? EAuthState::E_FAILED : EAuthState::E_HANDSHAKE;
+    return m_handshake_state;
+  }
+
+  TLS_SocketProxy::EProcState TLS_SocketProxy::handshake_send_state(int32_t post_transferred, int32_t *out_transferring) {
+    uint32_t send_buf_size = get_os_layer()->send_buf_size();
+    char* tls_out = new char[send_buf_size];
+
+    int pending = BIO_ctrl_pending(m_out_bio);
+    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, send_buf_size));
+    if (bytes_to_send > 0) {
+      if (is_busy(EPipeOperation::E_SEND)) {
+        return EProcState::E_WAITING;
+      }
+
+      std::cout << socket() << ": SEND at " << std::chrono::high_resolution_clock::now().time_since_epoch().count() << std::endl;
+
+      uint32_t flags_ = 0;
+      if (m_pipe->send(tls_out, bytes_to_send, &flags_)) {
+        *out_transferring = bytes_to_send;
+        return EProcState::E_WAITING;
+      }
+      else {
+        *out_transferring = -1;
+        return EProcState::E_FAILED;
       }
     }
 
+    *out_transferring = 0;
+    return EProcState::E_WAITING;
+  }
+
+  TLS_SocketProxy::EProcState TLS_SocketProxy::handshake_recv_state(int32_t post_transferred) {
+    char* recv_buf = get_os_layer()->recv_buf();
+
+    if (post_transferred != 0) {
+      // Push received TLS data into OpenSSL's read BIO
+      int written = BIO_write(m_in_bio, recv_buf, post_transferred);
+      if (written <= 0) {
+        fprintf(stderr, "BIO_write to rbio failed.\n");
+        return EProcState::E_FAILED;
+      }
+
+      return EProcState::E_READY;
+    }
+
+    if (is_busy(EPipeOperation::E_RECV)) {
+      return EProcState::E_WAITING;
+    }
+
+    std::cout << socket() << ": RECV at " << std::chrono::high_resolution_clock::now().time_since_epoch().count() << std::endl;
+
+    uint32_t tmp_;
+    uint32_t flags_ = 0;
+    return m_pipe->recv(0, &flags_, &tmp_)
+      ? EProcState::E_WAITING : EProcState::E_FAILED;
+  }
+
+  bool TLS_SocketProxy::set_accept_state() {
+    SSL_set_accept_state(m_ssl);
+    return true;
+  }
+
+  bool TLS_SocketProxy::set_connect_state() {
+    SSL_set_connect_state(m_ssl);
     return true;
   }
 
 }  // namespace netpp
-
-
-/*
-
-        char buffer[4096];
-        int bytes = (uint32_t)BIO_read(m_out_bio, buffer, sizeof(buffer));
-        if (bytes > 0) {
-          if (!m_pipe->send(buffer, bytes, nullptr)) {
-            return false;
-          }
-        }
-
-        uint32_t recv_bytes;
-        if (!m_pipe->recv(0, nullptr, &recv_bytes)) {
-          return false;
-        }
-
-        // Wait for the data to arrive
-        m_pipe->sync();
-
-        BIO_write(m_in_bio, buffer, recv_bytes);*/

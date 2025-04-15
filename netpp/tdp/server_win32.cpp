@@ -24,7 +24,10 @@ namespace netpp {
     return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
-  TCP_Server::TCP_Server(bool use_tls_ssl, uint32_t desired_bufsize, uint32_t bufcount, int max_threads) : m_stop_flag(false) {
+  TCP_Server::TCP_Server(
+    bool use_tls_ssl, const char* key_file, const char* cert_file,
+    uint32_t desired_bufsize, uint32_t bufcount, int max_threads)
+    : m_stop_flag(false), m_key_file(key_file), m_cert_file(cert_file) {
     m_tls_ssl = use_tls_ssl;
 
     m_error = EServerError::E_NONE;
@@ -82,7 +85,7 @@ namespace netpp {
 
     ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
     if (m_tls_ssl) {
-      m_server_socket.m_pipe = new TLS_SocketProxy(pipe);
+      m_server_socket.m_pipe = new TLS_SocketProxy(pipe, key_file, cert_file);
     }
     else {
       m_server_socket.m_pipe = pipe;
@@ -146,6 +149,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Request* request) {
     bool result = true;
+    std::unique_lock<std::mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, request](auto& kv) {
       if (!kv.second.m_pipe->send(request)) {
         result = false;
@@ -156,6 +160,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Response* response) {
     bool result = true;
+    std::unique_lock<std::mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, response](auto& kv) {
       if (!kv.second.m_pipe->send(response)) {
         result = false;
@@ -166,6 +171,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const RawPacket* packet) {
     bool result = true;
+    std::unique_lock<std::mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&result, packet](auto& kv) {
       if (!kv.second.m_pipe->send(packet)) {
         result = false;
@@ -355,6 +361,110 @@ namespace netpp {
     return adapter;
   }
 
+  bool TCP_Server::handle_auth_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info) {
+    ISocketPipe* pipe = sock_data.m_pipe;
+
+    switch (info.m_operation) {
+    case EPipeOperation::E_RECV: {
+      sock_data.m_recv_state.m_bytes_sent = info.m_bytes_transferred;
+      sock_data.m_last_op = EPipeOperation::E_RECV;
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+      break;
+    }
+    case EPipeOperation::E_SEND: {
+      sock_data.m_send_state.m_bytes_sent = info.m_bytes_transferred;
+      sock_data.m_last_op = EPipeOperation::E_SEND;
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_SEND, false);
+      break;
+    }
+    case EPipeOperation::E_CLOSE: {
+      pipe->close();
+      return true;
+    }
+    default:
+      return false;
+    }
+
+    EAuthState auth_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
+    if (auth_state == EAuthState::E_AUTHENTICATED) {
+      SocketIOState default_state = { nullptr, 0, 0 };
+
+      m_client_sockets[pipe->socket()] = {
+        pipe, default_state, default_state, false
+      };
+
+      m_pending_auth_sockets.erase(pipe->socket());
+    } else if (auth_state == EAuthState::E_FAILED) {
+      m_pending_auth_sockets.erase(pipe->socket());
+
+      pipe->close();
+    }
+    return true;
+  }
+
+  bool TCP_Server::handle_client_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info) {
+    ISocketPipe* pipe = sock_data.m_pipe;
+
+    switch (info.m_operation) {
+    case EPipeOperation::E_RECV: {
+      sock_data.m_last_op = EPipeOperation::E_RECV;
+
+      bool inproc = false;
+      IApplicationLayerAdapter* adapter = handle_inproc_recv(sock_data, info, inproc);
+      if (!adapter) {
+        pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+        sock_data.m_recv_state = { nullptr, 0, 0 };
+        return false;
+      }
+
+      if (!inproc) {
+        ISocketOSSupportLayer* os_layer = pipe->get_os_layer();
+        os_layer->set_transferred(EPipeOperation::E_RECV, sock_data.m_recv_state.m_bytes_sent);
+        os_layer->set_busy(EPipeOperation::E_RECV, false);
+        if (!adapter->on_receive(sock_data.m_pipe, os_layer->recv_buf(), sock_data.m_recv_state.m_bytes_sent, 0)) {
+          pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+          sock_data.m_recv_state = { nullptr, 0, 0 };
+          return true;
+        }
+        sock_data.m_recv_state.m_bytes_sent = 0;
+        sock_data.m_recv_state.m_bytes_total = 0;
+      }
+      return true;
+    }
+    case EPipeOperation::E_SEND: {
+      ISocketOSSupportLayer* os_layer = pipe->get_os_layer();
+      sock_data.m_last_op = EPipeOperation::E_RECV;
+
+      // Check if the send is incomplete (chunking the data)
+      sock_data.m_send_state.m_bytes_sent += info.m_bytes_transferred;
+
+      os_layer->set_transferred(EPipeOperation::E_SEND, sock_data.m_send_state.m_bytes_sent);
+      os_layer->set_busy(EPipeOperation::E_SEND, false);
+
+      const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_sent;
+      if (bytes_left > 0) {
+        // Send the remaining data
+        return pipe->send(sock_data.m_send_state.m_bytes_buf + sock_data.m_send_state.m_bytes_sent, bytes_left, nullptr);
+      }
+      else {
+        // Send is complete
+        sock_data.m_send_state.m_bytes_sent = 0;
+        sock_data.m_send_state.m_bytes_total = 0;
+
+        delete[] sock_data.m_send_state.m_bytes_buf;
+        sock_data.m_send_state.m_bytes_buf = nullptr;
+        return true;
+      }
+    }
+    case EPipeOperation::E_CLOSE: {
+      pipe->close();
+      return true;
+    }
+    }
+
+    return false;
+  }
+
   void TCP_Server::integrate_pending_sockets() {
     while (!m_awaiting_sockets.empty()) {
       uint64_t socket = m_awaiting_sockets.front();
@@ -364,7 +474,7 @@ namespace netpp {
         m_server_socket.m_pipe->get_os_layer(), &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
 
       if (m_tls_ssl) {
-        client_pipe = new TLS_SocketProxy(client_pipe);
+        client_pipe = new TLS_SocketProxy(client_pipe, m_key_file, m_cert_file);
       }
 
       client_pipe->open(socket);
@@ -374,6 +484,11 @@ namespace netpp {
         m_pending_auth_sockets[socket] = {
           client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, true
         };
+        {
+          TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
+          SocketLock l = proxy->acquire_lock();
+          proxy->set_accept_state();
+        }
       }
       else {
         m_client_sockets[socket] = {
@@ -383,13 +498,29 @@ namespace netpp {
     }
   }
 
+  void TCP_Server::proc_auth_on_sockets() {
+    for (auto& socket : m_pending_auth_sockets) {
+      ISocketPipe* pipe = socket.second.m_pipe;
+      if (pipe == nullptr) {
+        continue;
+      }
+    }
+  }
+
   void TCP_Server::receive_on_sockets() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+
     for (auto& socket : m_client_sockets) {
       ISocketPipe* pipe = socket.second.m_pipe;
+      if (!pipe) {
+        fprintf(stderr, "Pipe was nullptr?\n");
+        continue;
+      }
+
       if (pipe->is_busy(EPipeOperation::E_RECV)) {
         continue;
       }
-      std::unique_lock<std::mutex> lock(m_mutex);
+
       if (!pipe->recv(0, NULL, NULL)) {
         // pipe->error(ESocketErrorReason::E_REASON_RECV);
         continue;
@@ -411,7 +542,7 @@ namespace netpp {
           server->m_server_socket.m_pipe->get_os_layer(), &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
 
         if (server->m_tls_ssl) {
-          client_pipe = new TLS_SocketProxy(client_pipe);
+          client_pipe = new TLS_SocketProxy(client_pipe, server->m_key_file, server->m_cert_file);
         }
 
         client_pipe->open(socket);
@@ -421,6 +552,14 @@ namespace netpp {
           server->m_pending_auth_sockets[socket] = {
             client_pipe, {nullptr, 0, 0}, {nullptr, 0, 0}, true
           };
+          {
+            TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
+            {
+              SocketLock l = proxy->acquire_lock();
+              proxy->set_accept_state();
+            }
+            proxy->proc_pending_auth(EPipeOperation::E_NONE, 0);
+          }
         }
         else {
           server->m_client_sockets[socket] = {
@@ -446,6 +585,7 @@ namespace netpp {
         return 0;
       }
 
+      server->proc_auth_on_sockets();
       server->receive_on_sockets();
     }
 
@@ -456,8 +596,7 @@ namespace netpp {
     TCP_Server* server = (TCP_Server*)param;
     ISocketPipe* server_pipe = server->m_server_socket.m_pipe;
 
-    // TODO: Figure out why the completion status never returns
-    //       Establish defined structure (should multiple sockets be handled per iocp thread?)
+    // TODO: Establish defined structure (should multiple sockets be handled per iocp thread?)
     //       If so, what does that look like?
     while (server->is_running()) {
       ISocketIOResult* sock_results = server->m_server_socket.m_pipe->wait_results();
@@ -470,62 +609,13 @@ namespace netpp {
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
         if (server->m_client_sockets.find(pipe->socket()) == server->m_client_sockets.end()) {
-          return false;
-        }
-
-        SocketData& sock_data = server->m_client_sockets[pipe->socket()];
-
-        switch (info.m_operation) {
-        case EPipeOperation::E_RECV: {
-          bool inproc = false;
-          IApplicationLayerAdapter* adapter = server->handle_inproc_recv(sock_data, info, inproc);
-          if (!adapter) {
-            pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-            sock_data.m_recv_state = { nullptr, 0, 0 };
+          if (server->m_pending_auth_sockets.find(pipe->socket()) == server->m_pending_auth_sockets.end()) {
             return false;
           }
-
-          if (!inproc) {
-            pipe->set_transferred(EPipeOperation::E_RECV, sock_data.m_recv_state.m_bytes_sent);
-            pipe->set_busy(info.m_operation, false);
-            if (!adapter->on_receive(sock_data.m_pipe, pipe->recv_buf(), sock_data.m_recv_state.m_bytes_sent, 0)) {
-              pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
-              sock_data.m_recv_state = { nullptr, 0, 0 };
-              return false;
-            }
-            sock_data.m_recv_state.m_bytes_sent = 0;
-            sock_data.m_recv_state.m_bytes_total = 0;
-          }
-          break;
+          return server->handle_auth_operations(server->m_pending_auth_sockets[pipe->socket()], info);
         }
-        case EPipeOperation::E_SEND: {
-          // Check if the send is incomplete (chunking the data)
-          sock_data.m_send_state.m_bytes_sent += info.m_bytes_transferred;
 
-          pipe->set_transferred(EPipeOperation::E_SEND, sock_data.m_send_state.m_bytes_sent);
-          pipe->set_busy(EPipeOperation::E_SEND, false);
-
-          const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_sent;
-          if (bytes_left > 0) {
-            // Send the remaining data
-            pipe->send(sock_data.m_send_state.m_bytes_buf + sock_data.m_send_state.m_bytes_sent, bytes_left, nullptr);
-          }
-          else {
-            // Send is complete
-            sock_data.m_send_state.m_bytes_sent = 0;
-            sock_data.m_send_state.m_bytes_total = 0;
-
-            delete[] sock_data.m_send_state.m_bytes_buf;
-            sock_data.m_send_state.m_bytes_buf = nullptr;
-          }
-          break;
-        }
-        case EPipeOperation::E_CLOSE: {
-          pipe->close();
-          break;
-        }
-        }
-        return true;
+        return server->handle_client_operations(server->m_pending_auth_sockets[pipe->socket()], info);
         });  // End of completion for loop
     }  // End of while loop
 
@@ -538,8 +628,14 @@ namespace netpp {
 
     while (server->is_running()) {
       if (server->m_purgatory_sockets.size() > 0) {
+        std::unique_lock<std::mutex> lock(server->m_mutex);
+
         uint64_t socket = server->m_purgatory_sockets.front();
         server->m_purgatory_sockets.pop();
+
+        if (server->m_client_sockets.find(socket) == server->m_client_sockets.end()) {
+          continue;
+        }
 
         SocketData& sock_data = server->m_client_sockets[socket];
         if (sock_data.m_pipe) {
