@@ -159,6 +159,7 @@ namespace netpp {
 
     bool m_tls_ssl;
     bool m_handshake_done;
+    EAuthState m_handshake_state;
   };
 
 }  // namespace netpp

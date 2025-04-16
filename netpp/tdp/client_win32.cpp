@@ -172,6 +172,15 @@ namespace netpp {
       return false;
     }
 
+    // Expect an authentication packet
+    if (!m_server_socket.m_pipe->recv(0, nullptr, nullptr)) {
+      return false;
+    }
+
+    while (!m_handshake_done) {
+      std::this_thread::sleep_for(16ms);
+    }
+
     return true;
   }
 
@@ -418,11 +427,26 @@ namespace netpp {
       return false;
     }
 
-    EAuthState auth_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
-    if (auth_state == EAuthState::E_AUTHENTICATED) {
-      m_handshake_done = true;
+    if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
+      if (sock_data.m_last_op != EPipeOperation::E_RECV) {
+        return true;
+      }
+
+      char* recv_buf = pipe->get_os_layer()->recv_buf();
+      char* proc_out = new char[info.m_bytes_transferred];
+      if (!pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred)) {
+        pipe->error(ESocketErrorReason::E_REASON_CONNECT);
+        return false;
+      }
+      
+      if (strncmp(proc_out, "--AUTHENTICATED--", 18) == 0) {
+        m_handshake_done = true;
+      }
+      return true;
     }
-    else if (auth_state == EAuthState::E_FAILED) {
+
+    m_handshake_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
+    if (m_handshake_state == EAuthState::E_FAILED) {
       pipe->error(ESocketErrorReason::E_REASON_CONNECT);
       return false;
     }

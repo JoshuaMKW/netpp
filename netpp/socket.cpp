@@ -683,12 +683,6 @@ namespace netpp {
       return m_connected;
     }
 
-    bool ping() override {
-      RawPacket packet{ "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", 8 };
-      uint32_t flags = 0;
-      return send(packet.message(), packet.length(), &flags);
-    }
-
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
       if (m_recv_buffer->IsBusy) {
         return false;
@@ -1303,12 +1297,6 @@ namespace netpp {
 
     bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
       return false;
-    }
-
-    bool ping() override {
-      RawPacket packet{ "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", 8 };
-      uint32_t flags = 0;
-      return send(packet.message(), packet.length(), &flags);
     }
 
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {

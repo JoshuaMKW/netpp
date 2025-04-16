@@ -53,10 +53,6 @@ namespace netpp {
     m_port = "";
   }
 
-  bool TCP_Socket::ping() {
-    return m_socket_layer->ping();
-  }
-
   bool TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     return m_socket_layer->recv(offset, flags, transferred_out);
   }

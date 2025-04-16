@@ -116,7 +116,10 @@ namespace netpp {
     }
 
     m_in_bio = BIO_new(BIO_s_mem());
+    BIO_set_nbio(m_in_bio, 1);
     m_out_bio = BIO_new(BIO_s_mem());
+    BIO_set_nbio(m_out_bio, 1);
+
     SSL_set_bio(m_ssl, m_in_bio, m_out_bio);
 
     return true;
@@ -187,11 +190,6 @@ namespace netpp {
     return true;
   }
 
-  bool TLS_SocketProxy::ping()
-  {
-    return false;
-  }
-
   bool TLS_SocketProxy::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
       return false;
@@ -204,23 +202,31 @@ namespace netpp {
       return false;
     }
 
+    fprintf(stdout, "Handshake Data: \n");
+    for (int32_t i = 0; i < in_size; ++i) {
+      if (i != 0 && (i % 16) == 0) {
+        fprintf(stdout, "\n\\x%02x", (unsigned char)in_data[i]);
+      }
+      else {
+        fprintf(stdout, "\\x%02x", (unsigned char)in_data[i]);
+      }
+    }
+
+    fprintf(stdout, "\n\n");
+
+    int pend = SSL_pending(m_ssl);
+
+    std::cout << "SSL state: " << SSL_state_string_long(m_ssl) << "\n";
+    std::cout << "SSL rstate: " << SSL_rstate_string_long(m_ssl) << "\n";
+
     int bytes = SSL_read(m_ssl, out_data, out_size);
     if (bytes > 0) {
       out_data[bytes] = 0;
       return true;
     }
     else {
-      int ssl_err = SSL_get_error(m_ssl, bytes);
-
-      if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
-        unsigned long err = ERR_get_error();
-        if (err == 0) {
-          fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
-        }
-        else {
-          fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
-        }
-      }
+      unsigned long err = ERR_get_error();
+      fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
     }
 
     return false;
@@ -331,6 +337,17 @@ namespace netpp {
     while (proc_state == EProcState::E_READY) {
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
+        // Handshake completed successfully
+        if (!is_server()) {
+          handshake_send_state(0, &transferring);
+        }
+        int pending = SSL_pending(m_ssl);
+        if (pending > 0) {
+          char* buf = new char[pending];
+          if (SSL_read(m_ssl, buf, pending) > 0) {
+            fprintf(stdout, "%d\n", pending);
+          }
+        }
         m_handshake_state = EAuthState::E_AUTHENTICATED;
         return EAuthState::E_AUTHENTICATED;
       }
@@ -352,8 +369,7 @@ namespace netpp {
           }
         } else {
           if (!m_handshake_initiated) {
-            proc_state = handshake_recv_state(0);
-            handshake_send_state(0, &transferring);
+            proc_state = handshake_send_state(0, &transferring);
           } else if (send_transferred > 0) {
             proc_state = handshake_recv_state(0);
           } else if (recv_transferred > 0) {
@@ -367,8 +383,7 @@ namespace netpp {
         if (is_server()) {
           proc_state = handshake_send_state(send_transferred, &transferring);
           wants_recv = transferring > 0;
-        }
-        else {
+        } else {
           proc_state = handshake_send_state(send_transferred, &transferring);
           wants_recv = transferring > 0;
         }
@@ -379,8 +394,7 @@ namespace netpp {
           unsigned long err = ERR_get_error();
           if (err == 0) {
             fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
-          }
-          else {
+          } else {
             fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
           }
         }
@@ -413,14 +427,20 @@ namespace netpp {
 
       uint32_t flags_ = 0;
       if (m_pipe->send(tls_out, bytes_to_send, &flags_)) {
+        delete[] tls_out;
+
         *out_transferring = bytes_to_send;
-        return EProcState::E_WAITING;
+        return EProcState::E_READY;
       }
       else {
+        delete[] tls_out;
+
         *out_transferring = -1;
         return EProcState::E_FAILED;
       }
     }
+    
+    delete[] tls_out;
 
     *out_transferring = 0;
     return EProcState::E_WAITING;

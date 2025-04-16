@@ -369,6 +369,21 @@ namespace netpp {
       sock_data.m_recv_state.m_bytes_sent = info.m_bytes_transferred;
       sock_data.m_last_op = EPipeOperation::E_RECV;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+
+      char* recv_buf = pipe->get_os_layer()->recv_buf();
+
+      fprintf(stdout, "Handshake Data: \n");
+      for (int32_t i = 0; i < info.m_bytes_transferred; ++i) {
+        if (i != 0 && (i % 16) == 0) {
+          fprintf(stdout, "\n\\x%02x", (unsigned char)recv_buf[i]);
+        }
+        else {
+          fprintf(stdout, "\\x%02x", (unsigned char)recv_buf[i]);
+        }
+      }
+
+      fprintf(stdout, "\n\n");
+
       break;
     }
     case EPipeOperation::E_SEND: {
@@ -387,6 +402,13 @@ namespace netpp {
 
     EAuthState auth_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
     if (auth_state == EAuthState::E_AUTHENTICATED) {
+      const char* data = "--AUTHENTICATED--";
+      if (!pipe->send(data, 18, nullptr)) {
+        pipe->error(ESocketErrorReason::E_REASON_SEND);
+        m_pending_auth_sockets.erase(pipe->socket());
+        return false;
+      }
+
       SocketIOState default_state = { nullptr, 0, 0 };
 
       m_client_sockets[pipe->socket()] = {
@@ -615,7 +637,7 @@ namespace netpp {
           return server->handle_auth_operations(server->m_pending_auth_sockets[pipe->socket()], info);
         }
 
-        return server->handle_client_operations(server->m_pending_auth_sockets[pipe->socket()], info);
+        return server->handle_client_operations(server->m_client_sockets[pipe->socket()], info);
         });  // End of completion for loop
     }  // End of while loop
 

@@ -167,8 +167,6 @@ namespace netpp {
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
-    // Blocking call to check for alive connection
-    virtual bool ping() = 0;
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
     // Application surrenders ownership of the buffer
@@ -257,8 +255,6 @@ namespace netpp {
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
-    // Blocking call to check for alive connection
-    virtual bool ping() = 0;
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
     // Application surrenders ownership of the buffer
@@ -363,8 +359,6 @@ namespace netpp {
       return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
     }
 
-    // Blocking call to check for alive connection
-    bool ping() override;
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
     // Application surrenders ownership of the buffer
@@ -485,8 +479,6 @@ namespace netpp {
       return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
     }
 
-    // Blocking call to check for alive connection
-    bool ping() override;
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
     // Application surrenders ownership of the buffer
@@ -606,9 +598,6 @@ namespace netpp {
     }
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
-
-    // Blocking call to check for alive connection
-    bool ping() override;
 
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 

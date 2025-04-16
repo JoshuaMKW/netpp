@@ -33,10 +33,6 @@ namespace netpp {
     m_socket_layer->close();
   }
 
-  bool UDP_Socket::ping() {
-    return m_socket_layer->ping();
-  }
-
   bool UDP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     return m_socket_layer->recv(offset, flags, transferred_out);
   }
