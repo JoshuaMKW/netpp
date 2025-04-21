@@ -442,6 +442,8 @@ namespace netpp {
       if (strncmp(proc_out, "--AUTHENTICATED--", 18) == 0) {
         m_handshake_done = true;
       }
+
+      delete[] proc_out;
       return true;
     }
 

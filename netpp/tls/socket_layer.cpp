@@ -250,25 +250,33 @@ namespace netpp {
       return false;
     }
 
+    bool ret = false;
+
     uint8_t* buffer = new uint8_t[written];
+
     int bytes = BIO_read(m_out_bio, buffer, written);
     if (bytes > 0) {
-      return m_pipe->send((const char*)buffer, bytes, flags);
+      ret = m_pipe->send((const char*)buffer, bytes, flags);
     }
 
-    return false;
+    delete[] buffer;
+    return ret;
   }
 
   bool TLS_SocketProxy::send(const HTTP_Request* request) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
+    bool ret = send(request_buf, request_buf_size, nullptr);
+    delete[] request_buf;
+    return ret;
   }
 
   bool TLS_SocketProxy::send(const HTTP_Response* response) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
+    bool ret = send(request_buf, request_buf_size, nullptr);
+    delete[] request_buf;
+    return ret;
   }
 
   bool TLS_SocketProxy::send(const RawPacket* packet) {
