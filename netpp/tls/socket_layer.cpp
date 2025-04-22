@@ -280,7 +280,10 @@ namespace netpp {
   }
 
   bool TLS_SocketProxy::send(const RawPacket* packet) {
-    return send(packet->message(), packet->length(), nullptr);
+    const char* packet_buf = RawPacket::build_buf(*packet);
+    bool ret = send(packet_buf, packet->length() + 4, nullptr);
+    delete[] packet_buf;
+    return ret;
   }
 
   EAuthState TLS_SocketProxy::proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) {

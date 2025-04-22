@@ -77,16 +77,16 @@
     <ClCompile Include="UDP\client_unix.cpp">
       <Filter>Source Files\UDP</Filter>
     </ClCompile>
-    <ClCompile Include="TDP\client_win32.cpp">
+    <ClCompile Include="tcp\client_win32.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
-    <ClCompile Include="TDP\client_unix.cpp">
+    <ClCompile Include="tcp\client_unix.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
-    <ClCompile Include="TDP\server_win32.cpp">
+    <ClCompile Include="tcp\server_win32.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
-    <ClCompile Include="TDP\server_unix.cpp">
+    <ClCompile Include="tcp\server_unix.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
     <ClCompile Include="client.cpp">
@@ -107,7 +107,7 @@
     <ClCompile Include="protocol.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="tdp\socket_win32.cpp">
+    <ClCompile Include="tcp\socket_win32.cpp">
       <Filter>Source Files\TCP</Filter>
     </ClCompile>
     <ClCompile Include="tls\socket_layer.cpp">

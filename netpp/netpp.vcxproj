@@ -180,11 +180,11 @@
     <ClCompile Include="server_adapter.cpp" />
     <ClCompile Include="socket.cpp" />
     <ClCompile Include="tls\socket_layer.cpp" />
-    <ClCompile Include="tdp\socket_win32.cpp" />
-    <ClCompile Include="TDP\client_unix.cpp" />
-    <ClCompile Include="TDP\client_win32.cpp" />
-    <ClCompile Include="TDP\server_unix.cpp" />
-    <ClCompile Include="TDP\server_win32.cpp" />
+    <ClCompile Include="tcp\socket_win32.cpp" />
+    <ClCompile Include="tcp\client_unix.cpp" />
+    <ClCompile Include="tcp\client_win32.cpp" />
+    <ClCompile Include="tcp\server_unix.cpp" />
+    <ClCompile Include="tcp\server_win32.cpp" />
     <ClCompile Include="UDP\client_unix.cpp" />
     <ClCompile Include="UDP\client_win32.cpp" />
     <ClCompile Include="UDP\server_unix.cpp" />

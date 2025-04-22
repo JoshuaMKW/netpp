@@ -40,17 +40,24 @@ namespace netpp {
   bool UDP_Socket::send(const HTTP_Request* request) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
+    bool ret = send(request_buf, request_buf_size, nullptr);
+    delete[] request_buf;
+    return ret;
   }
 
   bool UDP_Socket::send(const HTTP_Response* response) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    return send(request_buf, request_buf_size, NULL) != 0;
+    bool ret = send(request_buf, request_buf_size, nullptr);
+    delete[] request_buf;
+    return ret;
   }
 
   bool UDP_Socket::send(const RawPacket* packet) {
-    return send(packet->message(), packet->length(), nullptr);
+    const char* packet_buf = RawPacket::build_buf(*packet);
+    bool ret = send(packet_buf, packet->length() + 4, nullptr);
+    delete[] packet_buf;
+    return ret;
   }
 
   void UDP_Socket::clone_callbacks_from(ISocketPipe* other) {
