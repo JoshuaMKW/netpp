@@ -135,7 +135,7 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class NETPP_API HTTP_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API HTTP_ApplicationAdapter : public IApplicationLayerAdapter {
   public:
     HTTP_ApplicationAdapter() = default;
     ~HTTP_ApplicationAdapter() override = default;
@@ -145,14 +145,10 @@ namespace netpp {
     uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
-  class NETPP_API HTTPS_ApplicationAdapter final : public IApplicationLayerAdapter {
+  class NETPP_API HTTPS_ApplicationAdapter final : public HTTP_ApplicationAdapter {
   public:
     HTTPS_ApplicationAdapter() = default;
     ~HTTPS_ApplicationAdapter() override = default;
-
-    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
   };
 
   class NETPP_API RAW_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -198,7 +194,7 @@ namespace netpp {
   class NETPP_API ApplicationAdapterFactory {
   public:
     static IApplicationLayerAdapter* create(EApplicationLayerProtocol protocol);
-    static IApplicationLayerAdapter* detect(const char* data, uint32_t size);
+    static IApplicationLayerAdapter* detect(const char* data, uint32_t size, bool is_tls_secure);
   };
 
 #pragma endregion

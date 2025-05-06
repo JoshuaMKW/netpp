@@ -197,49 +197,29 @@ namespace netpp {
     return m_pipe->recv(offset, flags, transferred_out);
   }
 
-  bool TLS_SocketProxy::proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) {
+  int32_t TLS_SocketProxy::proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) {
     if (BIO_write(m_in_bio, in_data, in_size) != in_size) {
-      return false;
+      return -1;
     }
-
-    fprintf(stdout, "Handshake Data: \n");
-    for (int32_t i = 0; i < in_size; ++i) {
-      if (i != 0 && (i % 16) == 0) {
-        fprintf(stdout, "\n\\x%02x", (unsigned char)in_data[i]);
-      }
-      else {
-        fprintf(stdout, "\\x%02x", (unsigned char)in_data[i]);
-      }
-    }
-
-    fprintf(stdout, "\n\n");
-
-    int pend = SSL_pending(m_ssl);
-
-    std::cout << "SSL state: " << SSL_state_string_long(m_ssl) << "\n";
-    std::cout << "SSL rstate: " << SSL_rstate_string_long(m_ssl) << "\n";
 
     int bytes = SSL_read(m_ssl, out_data, out_size);
     if (bytes > 0) {
-      out_data[bytes] = 0;
-      return true;
-    }
-    else {
+      return bytes;
+    } else {
       unsigned long err = ERR_get_error();
       fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
     }
 
-    return false;
+    return -1;
   }
 
-  // Application surrenders ownership of the buffer
   bool TLS_SocketProxy::send(const char* data, uint32_t size, uint32_t* flags) {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
       return false;
     }
 
-    int written = SSL_write(m_ssl, data, size);
-    if (written <= 0) {
+    int processed = SSL_write(m_ssl, data, size);
+    if (processed <= 0) {
       unsigned long err = ERR_get_error();
       if (err == 0) {
         fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
@@ -252,6 +232,7 @@ namespace netpp {
 
     bool ret = false;
 
+    int written = BIO_ctrl_pending(m_out_bio);
     uint8_t* buffer = new uint8_t[written];
 
     int bytes = BIO_read(m_out_bio, buffer, written);

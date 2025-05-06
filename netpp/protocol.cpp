@@ -70,18 +70,6 @@ namespace netpp {
     return calc_size(data, size);
   }
 
-  bool HTTPS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
-    return false;
-  }
-
-  uint32_t HTTPS_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
-    return 0;
-  }
-
-  uint32_t HTTPS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
-    return calc_size(data, size) - (TLS_SocketProxy::record_size + TLS_SocketProxy::iv_size + TLS_SocketProxy::key_size);
-  }
-
   bool RAW_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     if (data == nullptr || size <= 4) {
       return false;
@@ -163,12 +151,12 @@ namespace netpp {
     }
   }
 
-  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size) {
+  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, bool is_tls_secure) {
     EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_RAW;
     // Check here for HTTPS
 
     if (HTTP_Request::is_http_request(data, size) || HTTP_Response::is_http_response(data, size)) {
-      protocol = EApplicationLayerProtocol::E_HTTP;
+      protocol = is_tls_secure ? EApplicationLayerProtocol::E_HTTPS : EApplicationLayerProtocol::E_HTTP;
     }
 
     return create(protocol);

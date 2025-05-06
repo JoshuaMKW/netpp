@@ -256,7 +256,7 @@ namespace netpp {
     response_size += 2;  // "\r\n" (end of headers)
     //-------------------------------------------------------------
 
-    char* response_buf = new char[response_size]();
+    char* response_buf = new char[response_size];
 
     //-------------------------------------------------------------
     // Status line
@@ -307,10 +307,6 @@ namespace netpp {
       *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
       offset += 2;
     }
-
-    *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
-    offset += 2;
-
     //-------------------------------------------------------------
 
     //-------------------------------------------------------------

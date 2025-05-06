@@ -257,12 +257,9 @@ namespace netpp {
 
     virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
-    // Application surrenders ownership of the buffer
     virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
     virtual bool send(const HTTP_Request* request) = 0;
     virtual bool send(const HTTP_Response* response) = 0;
-
-    // Application surrenders ownership of the buffer
     virtual bool send(const RawPacket* packet) = 0;
 
     virtual void on_close(close_cb cb) = 0;
@@ -294,7 +291,7 @@ namespace netpp {
     virtual void* user_data() const = 0;
 
     virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
-    virtual bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
+    virtual int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
 
     static inline bool is_ping_packet(const char* buf, size_t size) {
@@ -304,16 +301,36 @@ namespace netpp {
 
   struct NETPP_API SocketIOState {
     const char* m_bytes_buf = nullptr;
-    uint32_t m_bytes_sent = 0;
+    uint32_t m_bytes_transferred = 0;
     uint32_t m_bytes_total = 0;
+
+    char* m_proc_buf = nullptr;
+    uint32_t m_bytes_processed = 0;
+
+    void reset_all() {
+      m_bytes_buf = nullptr;
+      reset_state();
+    }
+
+    void reset_state() {
+      m_bytes_transferred = 0;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+
+      delete[] m_proc_buf;
+      m_proc_buf = nullptr;
+    }
   };
 
   struct NETPP_API SocketData {
     ISocketPipe* m_pipe;
+
     SocketIOState m_recv_state;
     SocketIOState m_send_state;
-    bool m_proc_handshake;
+
     EPipeOperation m_last_op;
+
+    bool m_proc_handshake;
   };
 
   /// <summary>
@@ -361,12 +378,9 @@ namespace netpp {
 
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
-    // Application surrenders ownership of the buffer
     bool send(const char* data, uint32_t size, uint32_t* flags) override { return m_socket_layer->send(data, size, flags); }
     bool send(const HTTP_Request* request) override;
     bool send(const HTTP_Response* response) override;
-
-    // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override {
@@ -409,9 +423,9 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+    int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
       memcpy_s(out_data, out_size, in_data, in_size);
-      return true;
+      return out_size;
     }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
@@ -527,9 +541,9 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
+    int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
       memcpy_s(out_data, out_size, in_data, in_size);
-      return true;
+      return out_size;
     }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
@@ -601,12 +615,9 @@ namespace netpp {
 
     bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
-    // Application surrenders ownership of the buffer
     bool send(const char* data, uint32_t size, uint32_t* flags) override;
     bool send(const HTTP_Request* request) override;
     bool send(const HTTP_Response* response) override;
-
-    // Application surrenders ownership of the buffer
     bool send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override { m_pipe->on_close(cb); }
@@ -638,7 +649,7 @@ namespace netpp {
     void* user_data() const override { return m_pipe->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
-    bool proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
+    int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
     ISocketOSSupportLayer* get_os_layer() const { return m_pipe->get_os_layer(); }
 
     /*

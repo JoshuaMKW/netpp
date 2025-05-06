@@ -301,7 +301,7 @@ namespace netpp {
     //       Establish defined structure (should multiple sockets be handled per iocp thread?)
     //       If so, what does that look like?
     IApplicationLayerAdapter* adapter_ctx = nullptr;
-    char* final_buf = nullptr, *proc_buf = nullptr;
+    char* final_buf = nullptr, * proc_buf = nullptr;
     uint32_t final_buf_size = 0, proc_buf_size = 0;
     bool inproc = false;
 
@@ -320,8 +320,8 @@ namespace netpp {
       std::unique_lock<std::mutex> lock(client->m_mutex);
 
       sock_results->for_each([&](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
-        uint32_t cur_offset = sock_data.m_recv_state.m_bytes_sent;
-        
+        uint32_t cur_offset = sock_data.m_recv_state.m_bytes_transferred;
+
         pipe->set_busy(info.m_operation, false);
 
         if (client->m_tls_ssl && !client->m_handshake_done) {
@@ -355,20 +355,21 @@ namespace netpp {
 
         // At this point, if the recv is no longer in process, do post processing and signal the receive
         if (!inproc) {
-          sock_data.m_pipe->proc_post_recv(final_buf, final_buf_size, proc_buf, proc_buf_size);
-          if (!adapter_ctx->on_receive(sock_data.m_pipe, final_buf, sock_data.m_recv_state.m_bytes_sent, 0)) {
+          int32_t true_size = sock_data.m_pipe->proc_post_recv(final_buf, final_buf_size, proc_buf, proc_buf_size);
+          if (!adapter_ctx->on_receive(sock_data.m_pipe, final_buf, true_size, 0)) {
             pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
             sock_data.m_recv_state = { nullptr, 0, 0 };
             return false;
           }
-          sock_data.m_recv_state.m_bytes_sent = 0;
+          sock_data.m_recv_state.m_bytes_transferred = 0;
+          sock_data.m_recv_state.m_bytes_processed = 0;
           sock_data.m_recv_state.m_bytes_total = 0;
           delete final_buf;
           delete proc_buf;
         }
 
         return true;
-      });
+        });
 #endif
     }  // End of while loop
 
@@ -381,14 +382,15 @@ namespace netpp {
 
     char* recv_buf = pipe->get_os_layer()->recv_buf();
 
-    data.m_recv_state.m_bytes_sent += info.m_bytes_transferred;
+    data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
 
     if (!inproc) {
-      char *proc_out = new char[info.m_bytes_transferred];
+      char* proc_out = new char[info.m_bytes_transferred];
       {
         // Here we process enough to determine the underlying protocol
-        pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
-        adapter = ApplicationAdapterFactory::detect(proc_out, info.m_bytes_transferred);
+        int32_t true_size = pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+        adapter = ApplicationAdapterFactory::detect(proc_out, true_size, m_tls_ssl);
+        data.m_recv_state.m_bytes_processed += true_size;
         data.m_recv_state.m_bytes_total = adapter->calc_size(proc_out, info.m_bytes_transferred);
       }
       delete[] proc_out;
@@ -398,13 +400,13 @@ namespace netpp {
     if (data.m_recv_state.m_bytes_total == 0) {
       inproc = true;
     }
-    else if (data.m_recv_state.m_bytes_sent < data.m_recv_state.m_bytes_total) {
+    else if (data.m_recv_state.m_bytes_processed < data.m_recv_state.m_bytes_total) {
       inproc = true;
     }
 
     return adapter;
   }
-  
+
   bool TCP_Client::handle_auth_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info) {
     ISocketPipe* pipe = sock_data.m_pipe;
 
@@ -427,6 +429,10 @@ namespace netpp {
       return false;
     }
 
+    if (m_handshake_done) {
+      return true;
+    }
+
     if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
       if (sock_data.m_last_op != EPipeOperation::E_RECV) {
         return true;
@@ -434,12 +440,14 @@ namespace netpp {
 
       char* recv_buf = pipe->get_os_layer()->recv_buf();
       char* proc_out = new char[info.m_bytes_transferred];
-      if (!pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred)) {
+
+      int32_t true_size = pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+      if (true_size < 0) {
         pipe->error(ESocketErrorReason::E_REASON_CONNECT);
         return false;
       }
-      
-      if (strncmp(proc_out, "--AUTHENTICATED--", 18) == 0) {
+
+      if (strncmp(proc_out, "--AUTHENTICATED--", true_size) == 0) {
         m_handshake_done = true;
       }
 
