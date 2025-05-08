@@ -362,3 +362,9 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /vcpkg_installed
+
+# certificate files
+*.pfx
+*.cer
+*.pem
+*.crt
