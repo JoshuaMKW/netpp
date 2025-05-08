@@ -123,8 +123,9 @@ namespace netpp {
     bool initialize();
     void deinitialize();
     
-    IApplicationLayerAdapter* handle_inproc_recv(SocketIOInfo& data, const ISocketIOResult::OperationData& info, bool& inproc);
-    bool handle_auth_operations(SocketIOInfo& sock_data, const ISocketIOResult::OperationData& info);
+    IApplicationLayerAdapter* handle_inproc_recv(SocketProcData& data, const ISocketIOResult::OperationData& info, bool& inproc);
+    bool handle_auth_operations(SocketProcData& data, const ISocketIOResult::OperationData& info);
+    bool handle_client_operations(SocketProcData& data, const ISocketIOResult::OperationData& info);
 
 #ifdef _WIN32
     static uint64_t client_iocp_thread_win32(void* param);
@@ -138,7 +139,7 @@ namespace netpp {
 
     StaticBlockAllocator m_recv_allocator;
     StaticBlockAllocator m_send_allocator;
-    SocketIOInfo m_server_socket;
+    SocketProcData m_server_socket;
 
     std::thread::id m_startup_thread;
 

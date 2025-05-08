@@ -157,6 +157,13 @@ namespace netpp {
     bool m_proc_handshake;
   };
 
+  struct SocketProcData {
+    ISocketPipe* m_pipe;
+    char* m_proc_buf;
+    uint32_t m_bytes_processed;
+    uint32_t m_bytes_total;
+  };
+
   class ISocketOSSupportLayer;
 
   class NETPP_API ISocketIOResult {

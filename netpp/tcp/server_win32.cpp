@@ -388,6 +388,25 @@ namespace netpp {
       info.m_bytes_transferred
     );
 
+    // It has failed in some manner...
+    // ---
+    if (true_size < 0) {
+      delete[] proc_buf;
+      inproc = false;
+      return nullptr;
+    }
+
+    // Under this circumstance, the pipe is waiting
+    // for more data to be received to complete the
+    // processing. This is important for TLS Records
+    // and other such structures...
+    // ---
+    if (true_size == 0) {
+      delete[] proc_buf;
+      inproc = true;
+      return nullptr;
+    }
+
     // Update the processed marker so the next pass is correctly offset...
     // ---
     data.m_bytes_processed += true_size;

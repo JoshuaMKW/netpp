@@ -23,13 +23,6 @@ namespace netpp {
 
   const char* server_error(EServerError error, int reason);
 
-  struct SocketProcData {
-    ISocketPipe* m_pipe;
-    char* m_proc_buf;
-    uint32_t m_bytes_processed;
-    uint32_t m_bytes_total;
-  };
-
   class NETPP_API IServer {
   public:
     virtual ~IServer() = default;

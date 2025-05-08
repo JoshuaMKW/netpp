@@ -202,6 +202,18 @@ namespace netpp {
       return -1;
     }
 
+    // Get the expected TLS Record size...
+    uint16_t tls_rec_size;
+    *((uint8_t*)(&tls_rec_size) + 0) = in_data[4];
+    *((uint8_t*)(&tls_rec_size) + 1) = in_data[3];
+
+    // If this is the case, the TLS Record
+    // has not been fully received yet and
+    // we should wait for more data...
+    if (in_size < tls_rec_size + 5) {
+      return 0;
+    }
+
     int bytes = SSL_read(m_ssl, out_data, out_size);
     if (bytes > 0) {
       return bytes;

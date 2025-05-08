@@ -78,8 +78,9 @@ namespace netpp {
       m_server_socket.m_pipe = pipe;
     }
 
-    m_server_socket.m_recv_state = { nullptr, 0, 0 };
-    m_server_socket.m_send_state = { nullptr, 0, 0 };
+    m_server_socket.m_proc_buf = nullptr;
+    m_server_socket.m_bytes_total = 0;
+    m_server_socket.m_bytes_processed = 0;
 
     //m_send_spec.m_token_rate = 32000;       // 32KB/s
     //m_send_spec.m_token_bucket_size = 8000; // 8KB (1/4 of token rate)
@@ -313,8 +314,11 @@ namespace netpp {
 
   uint64_t TCP_Client::client_iocp_thread_win32(void* param) {
     TCP_Client* client = (TCP_Client*)param;
-    SocketIOInfo& sock_data = client->m_server_socket;
-    ISocketPipe* server_pipe = sock_data.m_pipe;
+
+    SocketProcData& data = client->m_server_socket;
+    const SocketIOInfo& sock_data = client->m_server_socket.m_pipe->get_io_info();
+
+    ISocketPipe* server_pipe = client->m_server_socket.m_pipe;
 
     // TODO: Figure out why the completion status never returns
     //       Establish defined structure (should multiple sockets be handled per iocp thread?)
@@ -355,50 +359,15 @@ namespace netpp {
         pipe->set_busy(info.m_operation, false);
 
         if (client->m_tls_ssl && !client->m_handshake_done) {
-          return client->handle_auth_operations(sock_data, info);
+          return client->handle_auth_operations(client->m_server_socket, info);
         }
 
         if (info.m_operation != EPipeOperation::E_RECV) {
+          pipe->signal_io_complete(info.m_operation);
           return true;
         }
 
-        bool was_inproc = inproc;
-        IApplicationLayerAdapter* adapter = client->handle_inproc_recv(sock_data, info, inproc);
-        if (!adapter_ctx && !adapter) {
-          pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-          sock_data.m_recv_state = { nullptr, 0, 0 };
-          return false;
-        }
-
-        // At the start, lock in the detected adapter and allocate necessary buffers
-        char* recv_buf = pipe->recv_buf();
-
-        if (!was_inproc) {
-          adapter_ctx = adapter;
-          proc_buf_size = sock_data.m_recv_state.m_bytes_total;
-          proc_buf = new char[proc_buf_size];
-          final_buf_size = adapter_ctx->calc_proc_size(recv_buf, proc_buf_size);
-          final_buf = new char[final_buf_size];
-        }
-
-        memcpy_s(proc_buf + cur_offset, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
-
-        // At this point, if the recv is no longer in process, do post processing and signal the receive
-        if (!inproc) {
-          int32_t true_size = sock_data.m_pipe->proc_post_recv(final_buf, final_buf_size, proc_buf, proc_buf_size);
-          if (!adapter_ctx->on_receive(sock_data.m_pipe, final_buf, true_size, 0)) {
-            pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
-            sock_data.m_recv_state = { nullptr, 0, 0 };
-            return false;
-          }
-          sock_data.m_recv_state.m_bytes_transferred = 0;
-          sock_data.m_recv_state.m_bytes_processed = 0;
-          sock_data.m_recv_state.m_bytes_total = 0;
-          delete final_buf;
-          delete proc_buf;
-        }
-
-        return true;
+        return client->handle_client_operations(client->m_server_socket, info);
         });
 #endif
     }  // End of while loop
@@ -406,48 +375,138 @@ namespace netpp {
     return 0;
   }
 
-  IApplicationLayerAdapter* TCP_Client::handle_inproc_recv(SocketIOInfo& data, const ISocketIOResult::OperationData& info, bool& inproc) {
-    ISocketPipe* pipe = data.m_pipe;
+  IApplicationLayerAdapter* TCP_Client::handle_inproc_recv(SocketProcData& data, const ISocketIOResult::OperationData& info, bool& inproc) {
     IApplicationLayerAdapter* adapter = nullptr;
+    ISocketPipe* pipe = data.m_pipe;
 
-    char* recv_buf = pipe->get_os_layer()->recv_buf();
+    const SocketIOInfo& sock_data = pipe->get_io_info();
+    const char* recv_buf = pipe->get_os_layer()->recv_buf();
 
-    data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
+    // Update how many unprocessed bytes have been transferred...
+    // ---
 
-    if (!inproc) {
-      char* proc_out = new char[info.m_bytes_transferred];
-      {
-        // Here we process enough to determine the underlying protocol
-        int32_t true_size = pipe->proc_post_recv(proc_out, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
-        adapter = ApplicationAdapterFactory::detect(proc_out, true_size, m_tls_ssl);
-        data.m_recv_state.m_bytes_processed += true_size;
-        data.m_recv_state.m_bytes_total = adapter->calc_size(proc_out, info.m_bytes_transferred);
+    //data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
+
+    // Under this circumstance, the total data hasn't been determined
+    // yet, so allocate a temporary smaller one to process
+    // the adapter with...
+    // ---
+    // We create a copy of the proc buffer pointer because
+    // later we do some pointer swapping based on the
+    // predicted size of the processed data...
+    // ---
+    char* proc_buf = nullptr;
+    if (data.m_bytes_total == 0) {
+      proc_buf = new char[info.m_bytes_transferred];
+    }
+    else {
+      proc_buf = data.m_proc_buf;
+    }
+
+    // Here we process enough to determine the underlying protocol
+    // ---
+    // The goal is this--m_proc_buf points to the potentially decrypted
+    // or otherwise post processed data taken from recv_buf.
+    //
+    // By keeping track of two buffers and the amount of bytes
+    // processed, we are able to stitch together fragmented
+    // data packets incoming from the socket...
+    // ---
+    int32_t true_size = pipe->proc_post_recv(
+      proc_buf + data.m_bytes_processed,
+      info.m_bytes_transferred,
+      recv_buf,
+      info.m_bytes_transferred
+    );
+
+    // It has failed in some manner...
+    // ---
+    if (true_size < 0) {
+      delete[] proc_buf;
+      inproc = false;
+      return nullptr;
+    }
+
+    // Under this circumstance, the pipe is waiting
+    // for more data to be received to complete the
+    // processing. This is important for TLS Records
+    // and other such structures...
+    // ---
+    if (true_size == 0) {
+      delete[] proc_buf;
+      inproc = true;
+      return nullptr;
+    }
+
+    // Update the processed marker so the next pass is correctly offset...
+    // ---
+    data.m_bytes_processed += true_size;
+
+    // Then we attempt to identify what kind of data is coming in from
+    // the socket... this is done after decryption so we can identify
+    // the application layer protocol regardless of security used...
+    // ---
+    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_tls_ssl);
+
+    // Finally we calculate the expected capacity of the protocol data
+    // ---
+    if (data.m_bytes_total == 0) {
+      data.m_bytes_total = adapter->calc_size(proc_buf, data.m_bytes_processed);
+    }
+
+    // If the adapter is not valid, we need to reset the state
+    // and return an error...
+    // ---
+    if (data.m_bytes_total == 0) {
+      pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+      data = { nullptr, 0, 0 };
+      return nullptr;
+    }
+
+    // Under the condition that the transferred data estimate doesn't
+    // the total expected data, we go ahead and resize the
+    // buffer to be the total bytes for the upcoming reads...
+    // ---
+    if (!data.m_proc_buf) {
+      if (data.m_bytes_total > info.m_bytes_transferred) {
+        char* new_proc_buf = new char[data.m_bytes_total];
+        memcpy_s(
+          new_proc_buf,
+          data.m_bytes_processed,
+          proc_buf,
+          data.m_bytes_processed
+        );
+        delete[] proc_buf;
+        data.m_proc_buf = new_proc_buf;
       }
-      delete[] proc_out;
+      else {
+        data.m_proc_buf = proc_buf;
+      }
+    }
+
+    // Initiate the next read...
+    if (data.m_bytes_processed < data.m_bytes_total) {
+      uint32_t flags = 0;
+      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+      uint32_t transferred;
+      pipe->recv(0, &flags, &transferred);
+      inproc = true;
+      return nullptr;
     }
 
     inproc = false;
-    if (data.m_recv_state.m_bytes_total == 0) {
-      inproc = true;
-    }
-    else if (data.m_recv_state.m_bytes_processed < data.m_recv_state.m_bytes_total) {
-      inproc = true;
-    }
-
     return adapter;
   }
 
-  bool TCP_Client::handle_auth_operations(SocketIOInfo& sock_data, const ISocketIOResult::OperationData& info) {
+  bool TCP_Client::handle_auth_operations(SocketProcData& sock_data, const ISocketIOResult::OperationData& info) {
     ISocketPipe* pipe = sock_data.m_pipe;
 
     switch (info.m_operation) {
     case EPipeOperation::E_RECV: {
-      sock_data.m_last_op = EPipeOperation::E_RECV;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       break;
     }
     case EPipeOperation::E_SEND: {
-      sock_data.m_last_op = EPipeOperation::E_SEND;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_SEND, false);
       break;
     }
@@ -464,7 +523,7 @@ namespace netpp {
     }
 
     if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
-      if (sock_data.m_last_op != EPipeOperation::E_RECV) {
+      if (info.m_operation != EPipeOperation::E_RECV) {
         return true;
       }
 
@@ -491,6 +550,129 @@ namespace netpp {
       return false;
     }
     return true;
+  }
+
+  bool TCP_Client::handle_client_operations(SocketProcData& data, const ISocketIOResult::OperationData& info) {
+    ISocketPipe* pipe = data.m_pipe;
+    const SocketIOInfo& sock_data = pipe->get_io_info();
+
+    switch (info.m_operation) {
+    case EPipeOperation::E_RECV: {
+      // Process the incoming and possibly incomplete
+      // data packet.
+      // ---
+      bool inproc = false;
+      IApplicationLayerAdapter* adapter = handle_inproc_recv(data, info, inproc);
+
+      // Finalize the low-level state of the pipe.
+      // ---
+      ISocketOSSupportLayer* os_layer = pipe->get_os_layer();
+      os_layer->set_transferred(EPipeOperation::E_RECV, sock_data.m_recv_state.m_bytes_transferred);
+      os_layer->set_busy(EPipeOperation::E_RECV, false);
+
+      if (inproc) {
+        return true;
+      }
+
+      os_layer->signal_io_complete(EPipeOperation::E_RECV);
+
+      // If the data is finished processing and the adapter
+      // still hasn't been determined, send an error
+      // and reset the server-owned socket state completely.
+      // ---
+      if (!adapter) {
+        pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+        return false;
+      }
+
+      // Here we pass all of the aggregated processed data
+      // handled by `handle_inproc_recv` to the adapter.
+      // This is where the callbacks are signaled for
+      // client code to handle.
+      // ---
+      uint32_t flags = 0;
+      bool success = adapter->on_receive(
+        pipe,
+        data.m_proc_buf,
+        data.m_bytes_processed,
+        flags
+      );
+
+      // Reset the process buffer for the next
+      // incoming data.
+      // ---
+      data.m_bytes_processed = 0;
+      delete[] data.m_proc_buf;
+      data.m_proc_buf = nullptr;
+
+      // The client code likely handled something incorrectly,
+      // the adapter is not implemented yet, or the adapter
+      // was incorrectly implemented.
+      // ---
+      if (!success) {
+        pipe->error(ESocketErrorReason::E_REASON_ADAPTER_FAIL);
+        return false;
+      }
+
+      return true;
+    }
+    case EPipeOperation::E_SEND: {
+      ISocketOSSupportLayer* os_layer = pipe->get_os_layer();
+
+      os_layer->set_transferred(EPipeOperation::E_SEND, sock_data.m_send_state.m_bytes_transferred);
+      os_layer->set_busy(EPipeOperation::E_SEND, false);
+
+      const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_transferred;
+      if (bytes_left > 0) {
+        uint32_t flags = IO_FLAG_PARTIAL;
+
+        // Send the remaining data
+        EIOState state = pipe->send(
+          sock_data.m_send_state.m_bytes_buf + sock_data.m_send_state.m_bytes_transferred,
+          bytes_left,
+          &flags
+        );
+
+        if (state == EIOState::E_BUSY) {
+          pipe->error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+
+        if (state == EIOState::E_ERROR) {
+          pipe->error(ESocketErrorReason::E_REASON_SEND);
+          return false;
+        }
+
+        if (state == EIOState::E_COMPLETE) {
+          os_layer->signal_io_complete(EPipeOperation::E_SEND);
+
+          // Send is complete
+          data.m_bytes_processed = 0;
+          delete[] data.m_proc_buf;
+          data.m_proc_buf = nullptr;
+          return true;
+        }
+
+        // Incomplete still?
+        return true;
+      }
+      else {
+        os_layer->signal_io_complete(EPipeOperation::E_SEND);
+
+        // Send is complete
+        data.m_bytes_processed = 0;
+        delete[] data.m_proc_buf;
+        data.m_proc_buf = nullptr;
+        return true;
+      }
+    }
+    case EPipeOperation::E_CLOSE: {
+      pipe->close();
+      return true;
+    }
+    }
+
+    return false;
   }
 
 }  // namespace netpp
