@@ -173,8 +173,15 @@ namespace netpp {
     }
 
     // Expect an authentication packet
-    if (!m_server_socket.m_pipe->recv(0, nullptr, nullptr)) {
+    EIOState state = m_server_socket.m_pipe->recv(0, nullptr, nullptr);
+    if (state == EIOState::E_ERROR) {
       return false;
+    }
+
+    // Just in case it is somehow busy, wait for it to finish
+    while (state == EIOState::E_BUSY) {
+      std::this_thread::sleep_for(16ms);
+      state = m_server_socket.m_pipe->recv(0, nullptr, nullptr);
     }
 
     while (!m_handshake_done) {
@@ -198,7 +205,13 @@ namespace netpp {
       return false;
     }
 
-    if (!m_server_socket.m_pipe->send(request)) {
+    EIOState state = m_server_socket.m_pipe->send(request);
+    if (state == EIOState::E_ERROR) {
+      emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
+      return false;
+    }
+
+    if (state == EIOState::E_BUSY) {
       emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
       return false;
     }
@@ -211,7 +224,13 @@ namespace netpp {
       return false;
     }
 
-    if (!m_server_socket.m_pipe->send(packet)) {
+    EIOState state = m_server_socket.m_pipe->send(packet);
+    if (state == EIOState::E_ERROR) {
+      emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
+      return false;
+    }
+
+    if (state == EIOState::E_BUSY) {
       emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
       return false;
     }
@@ -294,7 +313,7 @@ namespace netpp {
 
   uint64_t TCP_Client::client_iocp_thread_win32(void* param) {
     TCP_Client* client = (TCP_Client*)param;
-    SocketData& sock_data = client->m_server_socket;
+    SocketIOInfo& sock_data = client->m_server_socket;
     ISocketPipe* server_pipe = sock_data.m_pipe;
 
     // TODO: Figure out why the completion status never returns
@@ -309,6 +328,17 @@ namespace netpp {
       if (!client->is_connected()) {
         std::this_thread::sleep_for(100ms);
         continue;
+      }
+
+      // Since the TLS handshake process manages its
+      // own recv calls, we wrap this for when
+      // the handshake isn't happening.
+      if (!client->m_tls_ssl || client->m_handshake_done) {
+        EIOState state = server_pipe->recv(0, nullptr, nullptr);
+        if (state == EIOState::E_ERROR) {
+          server_pipe->error(ESocketErrorReason::E_REASON_RECV);
+          return 0;
+        }
       }
 
       ISocketIOResult* sock_results = server_pipe->wait_results();
@@ -376,7 +406,7 @@ namespace netpp {
     return 0;
   }
 
-  IApplicationLayerAdapter* TCP_Client::handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool& inproc) {
+  IApplicationLayerAdapter* TCP_Client::handle_inproc_recv(SocketIOInfo& data, const ISocketIOResult::OperationData& info, bool& inproc) {
     ISocketPipe* pipe = data.m_pipe;
     IApplicationLayerAdapter* adapter = nullptr;
 
@@ -407,7 +437,7 @@ namespace netpp {
     return adapter;
   }
 
-  bool TCP_Client::handle_auth_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info) {
+  bool TCP_Client::handle_auth_operations(SocketIOInfo& sock_data, const ISocketIOResult::OperationData& info) {
     ISocketPipe* pipe = sock_data.m_pipe;
 
     switch (info.m_operation) {

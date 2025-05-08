@@ -33,31 +33,73 @@ namespace netpp {
     m_socket_layer->close();
   }
 
-  bool UDP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
-    return m_socket_layer->recv(offset, flags, transferred_out);
+  EIOState UDP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
+    int32_t ret = m_socket_layer->recv(offset, flags, transferred_out);
+
+    if (ret == -1) {
+      // The socket or input is corrupted
+      return EIOState::E_ERROR;
+    } else if (ret == 0) {
+      // The socket is busy, call again
+      // after the transaction confirms
+      return EIOState::E_BUSY;
+    } else {
+      m_io_info.m_last_op = EPipeOperation::E_RECV;
+      m_io_info.m_recv_state.m_bytes_buf = m_socket_layer->recv_buf();
+      m_io_info.m_recv_state.m_bytes_total = 0;
+      m_io_info.m_recv_state.m_bytes_transferred = 0;
+
+      // The socket sent all the data
+      return EIOState::E_ASYNC;
+    }
   }
 
-  bool UDP_Socket::send(const HTTP_Request* request) {
+  EIOState UDP_Socket::send(const char* data, uint32_t size, uint32_t* flags) {
+    int32_t transferred = m_socket_layer->send(data, size, flags);
+    
+
+    if (transferred == -1) {
+      // The socket or input is corrupted
+      return EIOState::E_ERROR;
+    } else if (transferred == 0) {
+      // The socket is busy, call again
+      // after the transaction confirms
+      return EIOState::E_BUSY;
+    } else if (transferred < size) {
+      m_io_info.m_last_op = EPipeOperation::E_SEND;
+      m_io_info.m_send_state.m_bytes_buf = data;
+      m_io_info.m_send_state.m_bytes_total = size;
+      m_io_info.m_send_state.m_bytes_transferred = transferred;
+
+      // The socket fragmented the data
+      // and we need to send the rest
+      return EIOState::E_PARTIAL;
+    } else {
+      m_io_info.m_last_op = EPipeOperation::E_SEND;
+      m_io_info.m_send_state.m_bytes_buf = data;
+      m_io_info.m_send_state.m_bytes_total = size;
+      m_io_info.m_send_state.m_bytes_transferred = transferred;
+
+      // The socket sent all the data
+      return EIOState::E_COMPLETE;
+    }
+  }
+
+  EIOState UDP_Socket::send(const HTTP_Request* request) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+    return send(request_buf, request_buf_size, nullptr);
   }
 
-  bool UDP_Socket::send(const HTTP_Response* response) {
-    uint32_t request_buf_size = 0;
-    const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+  EIOState UDP_Socket::send(const HTTP_Response* response) {
+    uint32_t response_buf_size = 0;
+    const char* response_buf = HTTP_Response::build_buf(*response, &response_buf_size);
+    return send(response_buf, response_buf_size, nullptr);
   }
 
-  bool UDP_Socket::send(const RawPacket* packet) {
+  EIOState UDP_Socket::send(const RawPacket* packet) {
     const char* packet_buf = RawPacket::build_buf(*packet);
-    bool ret = send(packet_buf, packet->length() + 4, nullptr);
-    delete[] packet_buf;
-    return ret;
+    return send(packet_buf, packet->length() + 4, nullptr);
   }
 
   void UDP_Socket::clone_callbacks_from(ISocketPipe* other) {

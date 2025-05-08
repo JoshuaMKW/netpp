@@ -26,7 +26,7 @@ namespace netpp {
 
       const HTTP_Response* response = pipe->signal_http_request(request);
       if (response) {
-        pipe->send(response);
+        pipe->send(response); 
         delete response;
       }
 

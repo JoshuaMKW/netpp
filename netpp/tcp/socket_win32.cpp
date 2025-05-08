@@ -53,31 +53,139 @@ namespace netpp {
     m_port = "";
   }
 
-  bool TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
-    return m_socket_layer->recv(offset, flags, transferred_out);
+  EIOState TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
+    SocketIOState& io_state = m_io_info.m_recv_state;
+
+    //if (io_state.m_state == EIOState::E_ASYNC) {
+    //  // The socket is busy, call again
+    //  // after the transaction confirms
+    //  return EIOState::E_BUSY;
+    //}
+
+    int32_t ret = m_socket_layer->recv(offset, flags, transferred_out);
+    EIOState state = m_socket_layer->state(EPipeOperation::E_RECV);
+
+    switch (state) {
+    case EIOState::E_BUSY:
+      // The socket is busy, call again
+      // after the transaction confirms
+      break;
+    case EIOState::E_ASYNC:
+      // The socket sent all the data
+      io_state.m_bytes_buf = m_socket_layer->recv_buf();
+      io_state.m_bytes_total = -1;
+      io_state.m_bytes_transferred = 0;
+      break;
+    case EIOState::E_COMPLETE:
+      io_state.m_bytes_buf = m_socket_layer->recv_buf();
+      io_state.m_bytes_total = -1;
+      io_state.m_bytes_transferred = 0;
+      break;
+    case EIOState::E_ERROR:
+      // The socket or input is corrupted
+      break;
+    }
+
+    return state;
   }
 
-  bool TCP_Socket::send(const HTTP_Request* request) {
+  EIOState TCP_Socket::send(const char* data, uint32_t size, uint32_t* flags) {
+    if (!data || size == 0) {
+      return EIOState::E_ERROR;
+    }
+
+    SocketIOState& io_state = m_io_info.m_send_state;
+
+    EIOState last_state = m_socket_layer->state(EPipeOperation::E_SEND);
+    
+    if (last_state == EIOState::E_PARTIAL) {
+      if (!flags || (*flags & IO_FLAG_PARTIAL) == 0) {
+        // The socket is busy, call again
+        // after the transaction confirms
+        return EIOState::E_BUSY;
+      }
+
+      int32_t transferred = m_socket_layer->send(data, size, flags);
+      EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
+
+      switch (state) {
+      case EIOState::E_BUSY:
+        // The socket is busy, call again
+        // after the transaction confirms
+        break;
+      case EIOState::E_ASYNC:
+        m_io_info.m_last_op = EPipeOperation::E_SEND;
+        io_state.m_bytes_buf = data;
+        io_state.m_bytes_total = -1;
+        io_state.m_bytes_transferred = 0;
+        break;
+      case EIOState::E_COMPLETE:
+        m_io_info.m_last_op = EPipeOperation::E_SEND;
+        io_state.m_bytes_buf = data;
+        io_state.m_bytes_total = size;
+        io_state.m_bytes_transferred = transferred;
+        break;
+      case EIOState::E_PARTIAL:
+        m_io_info.m_last_op = EPipeOperation::E_SEND;
+        io_state.m_bytes_buf = data;
+        io_state.m_bytes_total = size;
+        io_state.m_bytes_transferred = transferred;
+        break;
+      case EIOState::E_ERROR:
+        // The socket or input is corrupted
+        break;
+      }
+    }
+
+    int32_t transferred = m_socket_layer->send(data, size, flags);
+    EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
+
+    switch (state) {
+    case EIOState::E_BUSY:
+      // The socket is busy, call again
+      // after the transaction confirms
+      break;
+    case EIOState::E_ASYNC:
+      m_io_info.m_last_op = EPipeOperation::E_SEND;
+      io_state.m_bytes_buf = data;
+      io_state.m_bytes_total = size;
+      io_state.m_bytes_transferred = transferred;
+      break;
+    case EIOState::E_COMPLETE:
+      m_io_info.m_last_op = EPipeOperation::E_SEND;
+      io_state.m_bytes_buf = data;
+      io_state.m_bytes_total = size;
+      io_state.m_bytes_transferred = transferred;
+      break;
+    case EIOState::E_PARTIAL:
+      m_io_info.m_last_op = EPipeOperation::E_SEND;
+      io_state.m_bytes_buf = data;
+      io_state.m_bytes_total = size;
+      io_state.m_bytes_transferred = transferred;
+      break;
+    case EIOState::E_ERROR:
+      // The socket or input is corrupted
+      break;
+    }
+
+    return state;
+  }
+
+  EIOState TCP_Socket::send(const HTTP_Request* request) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+    return send(request_buf, request_buf_size, nullptr);
   }
 
-  bool TCP_Socket::send(const HTTP_Response* response) {
+  EIOState TCP_Socket::send(const HTTP_Response* response) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+    return send(request_buf, request_buf_size, nullptr);
   }
 
-  bool TCP_Socket::send(const RawPacket* packet) {
+  EIOState TCP_Socket::send(const RawPacket* packet) {
     const char* packet_buf = RawPacket::build_buf(*packet);
-    bool ret = send(packet_buf, packet->length() + 4, nullptr);
-    delete[] packet_buf;
-    return ret;
+    return send(packet_buf, packet->length() + 4, nullptr);
   }
 
   void TCP_Socket::clone_callbacks_from(ISocketPipe* other) {

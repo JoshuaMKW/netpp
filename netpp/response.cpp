@@ -261,7 +261,7 @@ namespace netpp {
     //-------------------------------------------------------------
     // Status line
     //-------------------------------------------------------------
-    memcpy(response_buf + offset, "HTTP/", 5);
+    memcpy_s(response_buf + offset, response_size, "HTTP/", 5);
     offset += 5;
 
     memcpy(response_buf + offset, response.version().c_str(), response.version().length());
@@ -269,13 +269,13 @@ namespace netpp {
 
     response_buf[offset++] = ' ';
 
-    memcpy(response_buf + offset, code_str.c_str(), code_str.length());
+    memcpy_s(response_buf + offset, response_size, code_str.c_str(), code_str.length());
     offset += code_str.length();
 
     response_buf[offset++] = ' ';
 
     size_t status_len = strlen(status);
-    memcpy(response_buf + offset, status, status_len);
+    memcpy_s(response_buf + offset, response_size, status, status_len);
     offset += status_len;
 
     *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
@@ -287,7 +287,7 @@ namespace netpp {
     //-------------------------------------------------------------
     for (int i = 0; i < response.headers_count(); i++) {
       size_t header_len = headers[i].length();
-      memcpy(response_buf + offset, headers[i].c_str(), header_len);
+      memcpy_s(response_buf + offset, response_size, headers[i].c_str(), header_len);
       offset += header_len;
       *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
       offset += 2;
@@ -299,9 +299,9 @@ namespace netpp {
       size_t body_len = body.length();
       std::string body_len_str = std::to_string(body_len);
 
-      memcpy(response_buf + offset, "Content-Length: ", 16);
+      memcpy_s(response_buf + offset, response_size, "Content-Length: ", 16);
       offset += 16;
-      memcpy(response_buf + offset, body_len_str.c_str(), body_len_str.length());
+      memcpy_s(response_buf + offset, response_size, body_len_str.c_str(), body_len_str.length());
       offset += body_len_str.length();
 
       *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
@@ -320,7 +320,7 @@ namespace netpp {
     //-------------------------------------------------------------
     if (response.has_body()) {
       size_t body_len = body.length();
-      memcpy(response_buf + offset, body.c_str(), body_len);
+      memcpy_s(response_buf + offset, response_size, body.c_str(), body_len);
       offset += body_len;
       *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
       offset += 2;

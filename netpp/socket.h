@@ -86,6 +86,17 @@ namespace netpp {
     E_CLIENT,
   };
 
+  enum class EIOState {
+    E_NONE,
+    E_ERROR,
+    E_BUSY,
+    E_ASYNC,
+    E_PARTIAL,
+    E_COMPLETE,
+  };
+
+#define IO_FLAG_PARTIAL 0x80000000
+
   enum class EAuthState {
     E_FAILED = -1,
     E_NONE,
@@ -108,7 +119,42 @@ namespace netpp {
     SocketLock(std::mutex& mut) : m_lock(mut) {}
     ~SocketLock() = default;
 
+  private:
     std::unique_lock<std::mutex> m_lock;
+  };
+
+  struct SocketIOState {
+    const char* m_bytes_buf = nullptr;
+    uint32_t m_bytes_transferred = 0;
+    uint32_t m_bytes_total = 0;
+
+    char* m_proc_buf = nullptr;
+    uint32_t m_bytes_processed = 0;
+
+    void reset_all() {
+      m_bytes_buf = nullptr;
+      reset_state();
+    }
+
+    void reset_state() {
+      m_bytes_transferred = 0;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+
+      delete[] m_proc_buf;
+      m_proc_buf = nullptr;
+    }
+  };
+
+  struct NETPP_API SocketIOInfo {
+    ISocketPipe* m_pipe;
+
+    SocketIOState m_recv_state;
+    SocketIOState m_send_state;
+
+    EPipeOperation m_last_op;
+
+    bool m_proc_handshake;
   };
 
   class ISocketOSSupportLayer;
@@ -150,6 +196,9 @@ namespace netpp {
     virtual bool is_busy(EPipeOperation op) const = 0;
     virtual void set_busy(EPipeOperation op, bool busy) = 0;
 
+    virtual EIOState state(EPipeOperation op) const = 0;
+    virtual void signal_io_complete(EPipeOperation op) = 0;
+
     virtual bool open(const char* hostname, const char* port) = 0;
     virtual bool open(uint64_t socket) = 0;
 
@@ -167,10 +216,10 @@ namespace netpp {
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
-    virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
+    virtual int32_t recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
     // Application surrenders ownership of the buffer
-    virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
+    virtual int32_t send(const char* data, uint32_t size, uint32_t* flags) = 0;
 
     // --------------------
 
@@ -255,12 +304,12 @@ namespace netpp {
     virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
-    virtual bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
+    virtual EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
 
-    virtual bool send(const char* data, uint32_t size, uint32_t* flags) = 0;
-    virtual bool send(const HTTP_Request* request) = 0;
-    virtual bool send(const HTTP_Response* response) = 0;
-    virtual bool send(const RawPacket* packet) = 0;
+    virtual EIOState send(const char* data, uint32_t size, uint32_t* flags) = 0;
+    virtual EIOState send(const HTTP_Request* request) = 0;
+    virtual EIOState send(const HTTP_Response* response) = 0;
+    virtual EIOState send(const RawPacket* packet) = 0;
 
     virtual void on_close(close_cb cb) = 0;
     virtual void on_error(error_cb cb) = 0;
@@ -292,45 +341,13 @@ namespace netpp {
 
     virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
     virtual int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
+
+    virtual const SocketIOInfo& get_io_info() const = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
 
     static inline bool is_ping_packet(const char* buf, size_t size) {
       return *(uint64_t*)buf == *(uint64_t*)"\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF";
     }
-  };
-
-  struct NETPP_API SocketIOState {
-    const char* m_bytes_buf = nullptr;
-    uint32_t m_bytes_transferred = 0;
-    uint32_t m_bytes_total = 0;
-
-    char* m_proc_buf = nullptr;
-    uint32_t m_bytes_processed = 0;
-
-    void reset_all() {
-      m_bytes_buf = nullptr;
-      reset_state();
-    }
-
-    void reset_state() {
-      m_bytes_transferred = 0;
-      m_bytes_total = 0;
-      m_bytes_processed = 0;
-
-      delete[] m_proc_buf;
-      m_proc_buf = nullptr;
-    }
-  };
-
-  struct NETPP_API SocketData {
-    ISocketPipe* m_pipe;
-
-    SocketIOState m_recv_state;
-    SocketIOState m_send_state;
-
-    EPipeOperation m_last_op;
-
-    bool m_proc_handshake;
   };
 
   /// <summary>
@@ -376,12 +393,12 @@ namespace netpp {
       return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
     }
 
-    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
+    EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
-    bool send(const char* data, uint32_t size, uint32_t* flags) override { return m_socket_layer->send(data, size, flags); }
-    bool send(const HTTP_Request* request) override;
-    bool send(const HTTP_Response* response) override;
-    bool send(const RawPacket* packet) override;
+    EIOState send(const char* data, uint32_t size, uint32_t* flags) override;
+    EIOState send(const HTTP_Request* request) override;
+    EIOState send(const HTTP_Response* response) override;
+    EIOState send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
@@ -427,6 +444,8 @@ namespace netpp {
       memcpy_s(out_data, out_size, in_data, in_size);
       return out_size;
     }
+
+    const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
   private:
@@ -445,6 +464,7 @@ namespace netpp {
 
     std::mutex m_mutex;
 
+    SocketIOInfo m_io_info;
     uint32_t m_recv_buf_block;
     uint32_t m_send_buf_block;
 
@@ -493,15 +513,15 @@ namespace netpp {
       return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
     }
 
-    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
+    EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
     // Application surrenders ownership of the buffer
-    bool send(const char* data, uint32_t size, uint32_t* flags) override { return m_socket_layer->send(data, size, flags); }
-    bool send(const HTTP_Request* request) override;
-    bool send(const HTTP_Response* response) override;
+    EIOState send(const char* data, uint32_t size, uint32_t* flags) override;
+    EIOState send(const HTTP_Request* request) override;
+    EIOState send(const HTTP_Response* response) override;
 
     // Application surrenders ownership of the buffer
-    bool send(const RawPacket* packet) override;
+    EIOState send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override {
       m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
@@ -545,6 +565,8 @@ namespace netpp {
       memcpy_s(out_data, out_size, in_data, in_size);
       return out_size;
     }
+
+    const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
 
   private:
@@ -563,6 +585,7 @@ namespace netpp {
 
     std::mutex m_mutex;
 
+    SocketIOInfo m_io_info;
     uint32_t m_recv_buf_block;
     uint32_t m_send_buf_block;
 
@@ -613,12 +636,12 @@ namespace netpp {
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
 
-    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
+    EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
-    bool send(const char* data, uint32_t size, uint32_t* flags) override;
-    bool send(const HTTP_Request* request) override;
-    bool send(const HTTP_Response* response) override;
-    bool send(const RawPacket* packet) override;
+    EIOState send(const char* data, uint32_t size, uint32_t* flags) override;
+    EIOState send(const HTTP_Request* request) override;
+    EIOState send(const HTTP_Response* response) override;
+    EIOState send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override { m_pipe->on_close(cb); }
     void on_error(error_cb cb) override { m_pipe->on_error(cb); }
@@ -650,6 +673,8 @@ namespace netpp {
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
     int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override;
+
+    const SocketIOInfo& get_io_info() const override { return m_pipe->get_io_info(); }
     ISocketOSSupportLayer* get_os_layer() const { return m_pipe->get_os_layer(); }
 
     /*

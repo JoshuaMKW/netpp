@@ -23,6 +23,13 @@ namespace netpp {
 
   const char* server_error(EServerError error, int reason);
 
+  struct SocketProcData {
+    ISocketPipe* m_pipe;
+    char* m_proc_buf;
+    uint32_t m_bytes_processed;
+    uint32_t m_bytes_total;
+  };
+
   class NETPP_API IServer {
   public:
     virtual ~IServer() = default;
@@ -79,23 +86,23 @@ namespace netpp {
     bool start(const char* hostname, const char* port) override;
     void stop() override;
 
-    const std::string& hostname() const override { return m_server_socket.m_pipe->hostname(); }
-    const std::string& port() const override { return m_server_socket.m_pipe->port(); }
+    const std::string& hostname() const override { return m_server_socket->hostname(); }
+    const std::string& port() const override { return m_server_socket->port(); }
 
     EServerError error() const override { return m_error; }
     int reason() const override { return m_reason; }
 
     // Set these before starting the server
-    void on_close(ISocketPipe::close_cb cb) override { m_server_socket.m_pipe->on_close(cb); }
-    void on_dns_request(ISocketPipe::dns_request_cb cb) override { m_server_socket.m_pipe->on_dns_request(cb); }
-    void on_dns_response(ISocketPipe::dns_response_cb cb) override { m_server_socket.m_pipe->on_dns_response(cb); }
-    void on_http_request(ISocketPipe::http_request_cb cb) override { m_server_socket.m_pipe->on_http_request(cb); }
-    void on_http_response(ISocketPipe::http_response_cb cb) override { m_server_socket.m_pipe->on_http_response(cb); }
-    void on_raw_receive(ISocketPipe::raw_receive_cb cb) override { m_server_socket.m_pipe->on_raw_receive(cb); }
-    void on_rtp_packet(ISocketPipe::rtp_packet_cb cb) override { m_server_socket.m_pipe->on_rtp_packet(cb); }
-    void on_rtcp_packet(ISocketPipe::rtcp_packet_cb cb) override { m_server_socket.m_pipe->on_rtcp_packet(cb); }
-    void on_sip_request(ISocketPipe::sip_request_cb cb) override { m_server_socket.m_pipe->on_sip_request(cb); }
-    void on_sip_response(ISocketPipe::sip_response_cb cb) override { m_server_socket.m_pipe->on_sip_response(cb); }
+    void on_close(ISocketPipe::close_cb cb) override { m_server_socket->on_close(cb); }
+    void on_dns_request(ISocketPipe::dns_request_cb cb) override { m_server_socket->on_dns_request(cb); }
+    void on_dns_response(ISocketPipe::dns_response_cb cb) override { m_server_socket->on_dns_response(cb); }
+    void on_http_request(ISocketPipe::http_request_cb cb) override { m_server_socket->on_http_request(cb); }
+    void on_http_response(ISocketPipe::http_response_cb cb) override { m_server_socket->on_http_response(cb); }
+    void on_raw_receive(ISocketPipe::raw_receive_cb cb) override { m_server_socket->on_raw_receive(cb); }
+    void on_rtp_packet(ISocketPipe::rtp_packet_cb cb) override { m_server_socket->on_rtp_packet(cb); }
+    void on_rtcp_packet(ISocketPipe::rtcp_packet_cb cb) override { m_server_socket->on_rtcp_packet(cb); }
+    void on_sip_request(ISocketPipe::sip_request_cb cb) override { m_server_socket->on_sip_request(cb); }
+    void on_sip_response(ISocketPipe::sip_response_cb cb) override { m_server_socket->on_sip_response(cb); }
 
     bool send_all(const HTTP_Request*) override;
     bool send_all(const HTTP_Response*) override;
@@ -119,14 +126,14 @@ namespace netpp {
     ISocketPipe* get_socket_pipe(uint64_t socket);
     void close_socket(ISocketPipe* pipe);
 
-    IApplicationLayerAdapter* handle_inproc_recv(SocketData& data, const ISocketIOResult::OperationData& info, bool& inproc);
+    IApplicationLayerAdapter* handle_inproc_recv(SocketProcData& data, const ISocketIOResult::OperationData& info, bool& inproc);
 
 #ifdef _WIN32
     static uint64_t server_iocp_thread_win32(void* param);
 #endif
 
-    bool handle_auth_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info);
-    bool handle_client_operations(SocketData& sock_data, const ISocketIOResult::OperationData& info);
+    bool handle_auth_operations(SocketProcData& data, const ISocketIOResult::OperationData& info);
+    bool handle_client_operations(SocketProcData& data, const ISocketIOResult::OperationData& info);
 
     void integrate_pending_sockets();
     void proc_auth_on_sockets();
@@ -142,10 +149,10 @@ namespace netpp {
 
     StaticBlockAllocator m_recv_allocator;
     StaticBlockAllocator m_send_allocator;
-    SocketData m_server_socket;
+    ISocketPipe* m_server_socket;
 
-    std::unordered_map<uint64_t, SocketData> m_pending_auth_sockets;
-    std::unordered_map<uint64_t, SocketData> m_client_sockets;
+    std::unordered_map<uint64_t, SocketProcData> m_pending_auth_sockets;
+    std::unordered_map<uint64_t, SocketProcData> m_client_sockets;
     std::unordered_map<uint64_t, std::thread> m_socket_threads;
 
     std::queue<uint64_t> m_awaiting_sockets;

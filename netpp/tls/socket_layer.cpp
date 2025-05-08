@@ -190,9 +190,9 @@ namespace netpp {
     return true;
   }
 
-  bool TLS_SocketProxy::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
+  EIOState TLS_SocketProxy::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
-      return false;
+      return EIOState::E_ERROR;
     }
     return m_pipe->recv(offset, flags, transferred_out);
   }
@@ -213,9 +213,9 @@ namespace netpp {
     return -1;
   }
 
-  bool TLS_SocketProxy::send(const char* data, uint32_t size, uint32_t* flags) {
+  EIOState TLS_SocketProxy::send(const char* data, uint32_t size, uint32_t* flags) {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
-      return false;
+      return EIOState::E_ERROR;
     }
 
     int processed = SSL_write(m_ssl, data, size);
@@ -227,44 +227,35 @@ namespace netpp {
       else {
         fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
       }
-      return false;
+      return EIOState::E_ERROR;
     }
-
-    bool ret = false;
 
     int written = BIO_ctrl_pending(m_out_bio);
     uint8_t* buffer = new uint8_t[written];
 
     int bytes = BIO_read(m_out_bio, buffer, written);
     if (bytes > 0) {
-      ret = m_pipe->send((const char*)buffer, bytes, flags);
+      return m_pipe->send((const char*)buffer, bytes, flags);
     }
 
-    delete[] buffer;
-    return ret;
+    return EIOState::E_ERROR;
   }
 
-  bool TLS_SocketProxy::send(const HTTP_Request* request) {
+  EIOState TLS_SocketProxy::send(const HTTP_Request* request) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Request::build_buf(*request, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+    return send(request_buf, request_buf_size, nullptr);
   }
 
-  bool TLS_SocketProxy::send(const HTTP_Response* response) {
+  EIOState TLS_SocketProxy::send(const HTTP_Response* response) {
     uint32_t request_buf_size = 0;
     const char* request_buf = HTTP_Response::build_buf(*response, &request_buf_size);
-    bool ret = send(request_buf, request_buf_size, nullptr);
-    delete[] request_buf;
-    return ret;
+    return send(request_buf, request_buf_size, nullptr);
   }
 
-  bool TLS_SocketProxy::send(const RawPacket* packet) {
+  EIOState TLS_SocketProxy::send(const RawPacket* packet) {
     const char* packet_buf = RawPacket::build_buf(*packet);
-    bool ret = send(packet_buf, packet->length() + 4, nullptr);
-    delete[] packet_buf;
-    return ret;
+    return send(packet_buf, packet->length() + 4, nullptr);
   }
 
   EAuthState TLS_SocketProxy::proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) {
@@ -415,21 +406,18 @@ namespace netpp {
         return EProcState::E_WAITING;
       }
 
-      std::cout << socket() << ": SEND at " << std::chrono::high_resolution_clock::now().time_since_epoch().count() << std::endl;
-
       uint32_t flags_ = 0;
-      if (m_pipe->send(tls_out, bytes_to_send, &flags_)) {
-        delete[] tls_out;
+      EIOState state = m_pipe->send(tls_out, bytes_to_send, &flags_);
 
-        *out_transferring = bytes_to_send;
-        return EProcState::E_READY;
-      }
-      else {
-        delete[] tls_out;
-
+      delete[] tls_out;
+      
+      if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
         *out_transferring = -1;
         return EProcState::E_FAILED;
       }
+
+      *out_transferring = bytes_to_send;
+      return EProcState::E_READY;
     }
     
     delete[] tls_out;
@@ -452,16 +440,18 @@ namespace netpp {
       return EProcState::E_READY;
     }
 
-    if (is_busy(EPipeOperation::E_RECV)) {
-      return EProcState::E_WAITING;
-    }
-
-    std::cout << socket() << ": RECV at " << std::chrono::high_resolution_clock::now().time_since_epoch().count() << std::endl;
+    //if (is_busy(EPipeOperation::E_RECV)) {
+    //  return EProcState::E_WAITING;
+    //}
 
     uint32_t tmp_;
     uint32_t flags_ = 0;
-    return m_pipe->recv(0, &flags_, &tmp_)
-      ? EProcState::E_WAITING : EProcState::E_FAILED;
+    EIOState state = m_pipe->recv(0, &flags_, &tmp_);
+    if (state == EIOState::E_ERROR) {
+      return EProcState::E_FAILED;
+    } else {
+      return EProcState::E_WAITING;
+    }
   }
 
   bool TLS_SocketProxy::set_accept_state() {

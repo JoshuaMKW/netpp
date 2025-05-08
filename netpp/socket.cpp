@@ -20,8 +20,6 @@ using namespace std::chrono_literals;
 #define RIO_PENDING_MAX 5
 #define RIO_MAX_BUFFERS 1024
 
-#define SKIP_BUF_INIT_FLAG 0x80000000
-
 #define CLIENT_USE_WSA true
 
 struct _WrapperState {
@@ -201,11 +199,13 @@ namespace netpp {
       this->buf = buffer;
       this->len = length;
       this->Operation = operation;
+      this->State = EIOState::E_NONE;
       this->Pipe = owner;
       this->IsBusy = FALSE;
     }
 
     EPipeOperation Operation;
+    EIOState State;
     ISocketOSSupportLayer* Pipe;
     BOOL IsBusy;
   };
@@ -378,17 +378,37 @@ namespace netpp {
       return;
     }
 
+    EIOState state(EPipeOperation op) const override {
+      switch (op) {
+      case EPipeOperation::E_NONE:
+        return EIOState::E_NONE;
+      case EPipeOperation::E_RECV:
+        return m_recv_buffer->State;
+      case EPipeOperation::E_SEND:
+        return m_send_buffer->State;
+      case EPipeOperation::E_RECV_SEND:
+        return EIOState::E_NONE;
+      }
+    }
+
+    void signal_io_complete(EPipeOperation op) override {
+      switch (op) {
+      case EPipeOperation::E_NONE:
+        return;
+      case EPipeOperation::E_RECV:
+        m_recv_buffer->State = EIOState::E_COMPLETE;
+        return;
+      case EPipeOperation::E_SEND:
+        m_send_buffer->State = EIOState::E_COMPLETE;
+        return;
+      case EPipeOperation::E_RECV_SEND:
+        m_recv_buffer->State = EIOState::E_COMPLETE;
+        m_send_buffer->State = EIOState::E_COMPLETE;
+        return;
+      }
+    }
+
     bool open(const char* hostname, const char* port) override {
-      m_recv_buf_block = m_recv_allocator->allocate();
-      m_recv_buffer->buf = (CHAR*)m_recv_allocator->ptr(m_recv_buf_block);
-      m_recv_buffer->len = (ULONG)m_recv_allocator->block_size();
-      m_recv_buffer->Pipe = this;
-
-      m_send_buf_block = m_send_allocator->allocate();
-      m_send_buffer->buf = (CHAR*)m_send_allocator->ptr(m_send_buf_block);
-      m_send_buffer->len = 0;
-      m_send_buffer->Pipe = this;
-
 #if 0
       if (m_socket != INVALID_SOCKET) {
         m_host_name = hostname;
@@ -457,7 +477,6 @@ namespace netpp {
       }
       }
 #endif
-
       m_host_name = hostname;
       m_port = port;
 
@@ -465,6 +484,22 @@ namespace netpp {
     }
 
     bool open(uint64_t socket_) override {
+      m_recv_buf_block = m_recv_allocator->allocate();
+      m_recv_buffer->buf = (CHAR*)m_recv_allocator->ptr(m_recv_buf_block);
+      m_recv_buffer->len = (ULONG)m_recv_allocator->block_size();
+      m_recv_buffer->Pipe = this;
+
+      m_send_buf_block = m_send_allocator->allocate();
+      m_send_buffer->buf = (CHAR*)m_send_allocator->ptr(m_send_buf_block);
+      m_send_buffer->len = 0;
+      m_send_buffer->Pipe = this;
+
+      int recv_buf_size = m_recv_allocator->block_size();
+      ::setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, (char*)&recv_buf_size, 4);
+
+      int send_buf_size = m_send_allocator->block_size();
+      ::setsockopt(socket_, SOL_SOCKET, SO_SNDBUF, (char*)&send_buf_size, 4);
+
       m_socket = socket_;
       return true;
     }
@@ -683,165 +718,173 @@ namespace netpp {
       return m_connected;
     }
 
-    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
+    int32_t recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
       if (m_recv_buffer->IsBusy) {
-        return false;
+        return 0;
       }
 
       uint32_t flags_ = flags ? *flags : 0;
 
-#if CLIENT_USE_WSA
       int rc = ::WSARecv(m_socket, m_recv_buffer, 1, (LPDWORD)transferred_out, (LPDWORD)&flags_, m_recv_overlapped, NULL);
       if (rc != 0) {
         int err = ::WSAGetLastError();
         if (err == WSA_IO_PENDING) {
           m_recv_buffer->IsBusy = TRUE;
+          m_recv_buffer->State = EIOState::E_ASYNC;
+          return 1;
         }
         else if (err != 0) {
           set_transferred(EPipeOperation::E_RECV, -1);
           error(ESocketErrorReason::E_REASON_SEND);
-          return false;
+          m_recv_buffer->State = EIOState::E_ERROR;
+          return -1;
         }
       }
-      return true;
-#else
-      *transferred_out = ::recv(m_socket, m_recv_buffer->buf + offset, recv_buf_size() - offset, flags_);
-      int rc = WSAGetLastError();
-      if (*transferred_out == 0) {
-        set_transferred(EPipeOperation::E_RECV, -1);
-        error(ESocketErrorReason::E_REASON_PORT);
-        return false;
-      }
-      else if (*(int*)transferred_out == INVALID_SOCKET) {
-        set_transferred(EPipeOperation::E_RECV, -1);
-        error(ESocketErrorReason::E_REASON_SOCKET);
-        return false;
-      }
-      return true;
-#endif
+      m_recv_buffer->State = EIOState::E_COMPLETE;
+      return 1;
     }
 
-    bool send(const char* data, uint32_t size, uint32_t* flags) override {
+    int32_t send(const char* data, uint32_t size, uint32_t* flags) override {
       if (m_send_buffer->IsBusy) {
-        return false;
+        return 0;
       }
 
       using namespace std::chrono;
 
-      size = min(size, send_buf_size());
-      memcpy_s(m_send_buffer->buf, send_buf_size(), data, size);
-      m_send_buffer->len = size;
+      int32_t sent_size = 0;
 
-      uint32_t flags_ = flags ? *flags : 0;
+      while (sent_size < size) {
+        int32_t chunk_size = min(size - sent_size, send_buf_size());
+        memcpy_s(m_send_buffer->buf, send_buf_size(), data + sent_size, chunk_size);
+        m_send_buffer->len = chunk_size;
+
+        uint32_t flags_ = flags ? *flags : 0;
 
 #if CLIENT_USE_WSA
-      int rc = ::WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
-      if (rc != 0) {
-        int err = ::WSAGetLastError();
-        if (err == WSA_IO_PENDING) {
-          m_send_buffer->IsBusy = TRUE;
+        int rc = ::WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
+        if (rc != 0) {
+          int err = ::WSAGetLastError();
+          if (err == WSA_IO_PENDING) {
+            sent_size += chunk_size;
+            m_send_buffer->IsBusy = TRUE;
+            m_send_buffer->State = EIOState::E_ASYNC;
+            continue;
+          }
+          else if (err != 0) {
+            if (sent_size > 0) {
+              m_send_buffer->State = EIOState::E_PARTIAL;
+              return sent_size;
+            }
+            error(ESocketErrorReason::E_REASON_SEND);
+            return -1;
+          }
         }
-        else if (err != 0) {
-          error(ESocketErrorReason::E_REASON_SEND);
-          return false;
-        }
+        sent_size += chunk_size;
+        continue;
       }
-      return true;
+
+      if (m_send_buffer->State == EIOState::E_ASYNC) {
+        return sent_size;
+      }
+
+      m_send_buffer->State = EIOState::E_COMPLETE;
+      m_send_buffer->IsBusy = FALSE;
+      return sent_size;
 #else
-      switch (m_protocol) {
-      case ETransportLayerProtocol::E_TCP: {
-        int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
-        if (rc == SOCKET_ERROR) {
-          set_transferred(EPipeOperation::E_SEND, -1);
-          error(ESocketErrorReason::E_REASON_SEND);
-          return false;
+        switch (m_protocol) {
+        case ETransportLayerProtocol::E_TCP: {
+          int rc = ::send(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_);
+          if (rc == SOCKET_ERROR) {
+            set_transferred(EPipeOperation::E_SEND, -1);
+            error(ESocketErrorReason::E_REASON_SEND);
+            return -1;
+          }
+          set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
+          return send_size;
         }
-        set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
-        return true;
-      }
-      case ETransportLayerProtocol::E_UDP: {
-        // Connect to the server...
-        sockaddr_in server_addr;
-        ZeroMemory(&server_addr, sizeof(server_addr));
+        case ETransportLayerProtocol::E_UDP: {
+          // Connect to the server...
+          sockaddr_in server_addr;
+          ZeroMemory(&server_addr, sizeof(server_addr));
 
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(atoi(m_port.c_str()));
-        inet_pton(AF_INET, m_host_name.c_str(), &server_addr.sin_addr);
+          server_addr.sin_family = AF_INET;
+          server_addr.sin_port = htons(atoi(m_port.c_str()));
+          inet_pton(AF_INET, m_host_name.c_str(), &server_addr.sin_addr);
 
-        int rc = ::sendto(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_, (sockaddr*)&server_addr, sizeof(sockaddr));
-        if (rc == SOCKET_ERROR) {
-          set_transferred(EPipeOperation::E_SEND, -1);
-          error(ESocketErrorReason::E_REASON_SEND);
-          return false;
+          int rc = ::sendto(m_socket, m_send_buffer->buf, m_send_buffer->len, flags_, (sockaddr*)&server_addr, sizeof(sockaddr));
+          if (rc == SOCKET_ERROR) {
+            set_transferred(EPipeOperation::E_SEND, -1);
+            error(ESocketErrorReason::E_REASON_SEND);
+            return -1;
+          }
+          set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
+          return send_size;
         }
-        set_transferred(EPipeOperation::E_SEND, m_send_buffer->len);
-        return true;
-      }
-      }
-      return false;
+        }
+        return -1;
 #endif
     }
 
-    char* recv_buf() const override {
-      return (char*)m_recv_allocator->ptr(m_recv_buf_block);
-    }
-
-    uint32_t recv_buf_size() const override {
-      return m_recv_allocator->block_size();
-    }
-
-    char* send_buf() const override {
-      return (char*)m_send_allocator->ptr(m_send_buf_block);
-    }
-
-    uint32_t send_buf_size() const override {
-      return m_send_allocator->block_size();
-    }
-
-    void set_recv_buf(char* buf) override {}
-    void set_recv_buf_size(uint32_t size) override {}
-    void set_send_buf(const char* buf) override {}
-    void set_send_buf_size(uint32_t size) override {}
-
-    int64_t get_transferred(EPipeOperation op) {
-      switch (op) {
-      case EPipeOperation::E_RECV:
-        return m_recv_transferred;
-      case EPipeOperation::E_SEND:
-        return m_send_transferred;
-      default:
-        return 0;
+      char* recv_buf() const override {
+        return (char*)m_recv_allocator->ptr(m_recv_buf_block);
       }
-    }
 
-    void set_transferred(EPipeOperation op, int64_t transferred) {
-      switch (op) {
-      case EPipeOperation::E_RECV:
-        m_recv_transferred = transferred;
-        break;
-      case EPipeOperation::E_SEND:
-        m_send_transferred = transferred;
-        break;
-      default:
-        break;
+      uint32_t recv_buf_size() const override {
+        return m_recv_allocator->block_size();
       }
-    }
 
-    ISocketIOResult* wait_results() override {
-      return new Win32ClientSocketIOResult(this, m_recv_overlapped, m_send_overlapped);
-    }
+      char* send_buf() const override {
+        return (char*)m_send_allocator->ptr(m_send_buf_block);
+      }
 
-    void* sys_data() const override { return m_iocp; }
-    void* user_data() const override { return nullptr; }
+      uint32_t send_buf_size() const override {
+        return m_send_allocator->block_size();
+      }
 
-    void on_close(close_cb cb) { m_on_close = cb; }
-    void on_error(error_cb cb) { m_on_error = cb; }
+      void set_recv_buf(char* buf) override {}
+      void set_recv_buf_size(uint32_t size) override {}
+      void set_send_buf(const char* buf) override {}
+      void set_send_buf_size(uint32_t size) override {}
 
-    void clone_callbacks_from(ISocketOSSupportLayer* other) {
-      Win32ClientSocketLayer* tcp = static_cast<Win32ClientSocketLayer*>(other);
-      m_on_close = tcp->m_on_close;
-      m_on_error = tcp->m_on_error;
-    }
+      int64_t get_transferred(EPipeOperation op) {
+        switch (op) {
+        case EPipeOperation::E_RECV:
+          return m_recv_transferred;
+        case EPipeOperation::E_SEND:
+          return m_send_transferred;
+        default:
+          return 0;
+        }
+      }
+
+      void set_transferred(EPipeOperation op, int64_t transferred) {
+        switch (op) {
+        case EPipeOperation::E_RECV:
+          m_recv_transferred = transferred;
+          break;
+        case EPipeOperation::E_SEND:
+          m_send_transferred = transferred;
+          break;
+        default:
+          break;
+        }
+      }
+
+      ISocketIOResult* wait_results() override {
+        return new Win32ClientSocketIOResult(this, m_recv_overlapped, m_send_overlapped);
+      }
+
+      void* sys_data() const override { return m_iocp; }
+      void* user_data() const override { return nullptr; }
+
+      void on_close(close_cb cb) { m_on_close = cb; }
+      void on_error(error_cb cb) { m_on_error = cb; }
+
+      void clone_callbacks_from(ISocketOSSupportLayer* other) {
+        Win32ClientSocketLayer* tcp = static_cast<Win32ClientSocketLayer*>(other);
+        m_on_close = tcp->m_on_close;
+        m_on_error = tcp->m_on_error;
+      }
 
   private:
     std::string m_host_name;
@@ -879,583 +922,638 @@ namespace netpp {
     std::mutex m_mutex;
   };
 
-  struct Tag_RIO_BUF : public RIO_BUF {
-    Tag_RIO_BUF(RIO_BUFFERID buffer_id, DWORD offset, DWORD length, EPipeOperation operation, ISocketOSSupportLayer* owner) {
-      this->BufferId = buffer_id;
-      this->Offset = offset;
-      this->Length = length;
-      this->Operation = operation;
-      this->Pipe = owner;
-      this->IsBusy = FALSE;
-    }
-
-    EPipeOperation Operation;
-    ISocketOSSupportLayer* Pipe;
-    BOOL IsBusy;
-  };
-
-  class Win32ServerSocketIOResult : public ISocketIOResult {
-  public:
-    Win32ServerSocketIOResult(HANDLE iocp, RIO_CQ& rio_cq, size_t capacity = 16)
-      : m_result_count(RIO_CORRUPT_CQ), m_result_max(0), m_results(nullptr) {
-      DWORD transferred_;
-      ULONG_PTR completion_key;
-      LPOVERLAPPED overlapped;
-
-      bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
-      if (!success) {
-        return;
+    struct Tag_RIO_BUF : public RIO_BUF {
+      Tag_RIO_BUF(RIO_BUFFERID buffer_id, DWORD offset, DWORD length, EPipeOperation operation, ISocketOSSupportLayer* owner) {
+        this->BufferId = buffer_id;
+        this->Offset = offset;
+        this->Length = length;
+        this->Operation = operation;
+        this->State = EIOState::E_NONE;
+        this->Pipe = owner;
+        this->IsBusy = FALSE;
       }
 
-      if (completion_key == (DWORD)ECompletionKey::E_STOP) {
-        return;
+      EPipeOperation Operation;
+      EIOState State;
+      ISocketOSSupportLayer* Pipe;
+      BOOL IsBusy;
+    };
+
+    class Win32ServerSocketIOResult : public ISocketIOResult {
+    public:
+      Win32ServerSocketIOResult(HANDLE iocp, RIO_CQ& rio_cq, size_t capacity = 16)
+        : m_result_count(RIO_CORRUPT_CQ), m_result_max(0), m_results(nullptr) {
+        DWORD transferred_;
+        ULONG_PTR completion_key;
+        LPOVERLAPPED overlapped;
+
+        bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
+        if (!success) {
+          return;
+        }
+
+        if (completion_key == (DWORD)ECompletionKey::E_STOP) {
+          return;
+        }
+
+        m_results = new RIORESULT[capacity];
+        m_result_max = capacity;
+        m_result_count = static_cast<size_t>(s_rio->RIODequeueCompletion(rio_cq, m_results, (ULONG)capacity));
       }
 
-      m_results = new RIORESULT[capacity];
-      m_result_max = capacity;
-      m_result_count = static_cast<size_t>(s_rio->RIODequeueCompletion(rio_cq, m_results, (ULONG)capacity));
-    }
-
-    ~Win32ServerSocketIOResult() override {
-      delete[] m_results;
-    }
-
-    bool is_valid() const {
-      return m_result_count != RIO_CORRUPT_CQ && m_result_count <= m_result_max;
-    }
-
-    bool for_each(each_fn cb) {
-      if (!is_valid()) {
-        return false;
+      ~Win32ServerSocketIOResult() override {
+        delete[] m_results;
       }
 
-      for (size_t i = 0; i < m_result_count; ++i) {
-        RIORESULT& result = m_results[i];
-        if (result.Status != NO_ERROR) {
+      bool is_valid() const {
+        return m_result_count != RIO_CORRUPT_CQ && m_result_count <= m_result_max;
+      }
+
+      bool for_each(each_fn cb) {
+        if (!is_valid()) {
           return false;
         }
 
-        Tag_RIO_BUF* buf = (Tag_RIO_BUF*)result.RequestContext;
-        ISocketOSSupportLayer* pipe = buf->Pipe;
-
-        if (!cb(pipe, { buf->Operation, result.BytesTransferred })) {
-          return false;
-        }
-      }
-
-      return true;
-    }
-
-  private:
-    RIORESULT* m_results;
-    size_t m_result_max;
-    size_t m_result_count;
-  };
-
-  class Win32ServerSocketLayer : public ISocketOSSupportLayer {
-  public:
-    Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
-      : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
-      m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
-      m_socket = INVALID_SOCKET;
-      m_recv_buffer = new Tag_RIO_BUF{
-        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
-        0,
-        0,
-        EPipeOperation::E_RECV,
-        this
-      };
-      m_send_buffer = new Tag_RIO_BUF{
-        RIO_BUFFERID{ RIO_INVALID_BUFFERID },
-        0,
-        0,
-        EPipeOperation::E_SEND,
-        this
-      };
-      m_completion_queue = RIO_INVALID_CQ;
-      m_request_queue = RIO_INVALID_RQ;
-      m_iocp = INVALID_HANDLE_VALUE;
-      m_overlapped = { 0 };
-      m_owner_socket_layer = owner_socker_layer;
-
-      m_protocol = protocol;
-    }
-
-    ~Win32ServerSocketLayer() override {
-      delete m_recv_buffer;
-      delete m_send_buffer;
-
-      if (m_socket != INVALID_SOCKET) {
-        ::shutdown(m_socket, SD_BOTH);
-        ::closesocket(m_socket);
-        m_socket = INVALID_SOCKET;
-      }
-    }
-
-    uint64_t socket() const override {
-      return (uint64_t)m_socket;
-    }
-
-    ETransportLayerProtocol protocol() const override {
-      return m_protocol;
-    }
-
-    bool is_server() const { return true; }
-
-    bool is_ready(EPipeOperation op) const override { return !is_busy(op); }
-
-    bool is_busy(EPipeOperation op) const override {
-      switch (op) {
-      case EPipeOperation::E_NONE:
-        return false;
-      case EPipeOperation::E_RECV:
-        return m_recv_buffer->IsBusy;
-      case EPipeOperation::E_SEND:
-        return m_send_buffer->IsBusy;
-      case EPipeOperation::E_RECV_SEND:
-        return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
-      }
-      return false;
-    }
-
-    void set_busy(EPipeOperation op, bool busy) override {
-      switch (op) {
-      case EPipeOperation::E_RECV:
-        m_recv_buffer->IsBusy = busy;
-        return;
-      case EPipeOperation::E_SEND:
-        m_send_buffer->IsBusy = busy;
-        return;
-      case EPipeOperation::E_RECV_SEND:
-        m_recv_buffer->IsBusy = busy;
-        m_send_buffer->IsBusy = busy;
-        return;
-      }
-      return;
-    }
-
-    bool open(const char* hostname, const char* port) override {
-      Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
-
-      uint64_t socket_ = 0;
-
-      switch (m_protocol) {
-      case ETransportLayerProtocol::E_TCP: {
-        socket_ = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_REGISTERED_IO);
-        if (socket_ == INVALID_SOCKET) {
-          return false;
-        }
-        break;
-      }
-      case ETransportLayerProtocol::E_UDP: {
-        socket_ = ::WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_REGISTERED_IO);
-        if (socket_ == INVALID_SOCKET) {
-          return false;
-        }
-        break;
-      }
-      }
-
-      m_host_name = hostname;
-      m_port = port;
-
-      return open(socket_);
-    }
-
-    bool open(uint64_t socket_) override {
-      Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
-
-      if (!SocketOSSupportLayerFactory::initialize(socket_)) {
-        return false;
-      }
-
-      int namelen = sizeof(sockaddr_in);
-      sockaddr_in addr;
-      addr.sin_family = AF_INET;
-      addr.sin_port = htons(atoi(m_port.c_str()));
-      inet_pton(AF_INET, m_host_name.c_str(), &addr.sin_addr);
-
-      ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
-
-      m_recv_buf_block = m_recv_allocator->allocate();
-      m_send_buf_block = m_send_allocator->allocate();
-
-      if (server_pipe) {
-        // In this circumstance, it is inheriting resources from the server
-        *m_recv_buffer = *server_pipe->m_recv_buffer;
-        m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
-        m_recv_buffer->Pipe = this;
-
-        *m_send_buffer = *server_pipe->m_send_buffer;
-        m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
-        m_send_buffer->Pipe = this;
-
-        m_completion_queue = server_pipe->m_completion_queue;
-        m_iocp = server_pipe->m_iocp;
-      }
-      else {
-        // In this circumstance, this is the server and it needs new resources
-        m_recv_buffer->BufferId = s_rio->RIORegisterBuffer(
-          (PCHAR)m_recv_allocator->ptr(m_recv_buf_block),
-          m_recv_allocator->block_size() * m_recv_allocator->capacity()
-        );
-        if (m_recv_buffer->BufferId == RIO_INVALID_BUFFERID) {
-          error(ESocketErrorReason::E_REASON_RESOURCES);
-          return false;
-        }
-        m_recv_buffer->Length = m_recv_allocator->block_size();
-        m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
-        m_recv_buffer->Pipe = this;
-
-        m_send_buffer->BufferId = s_rio->RIORegisterBuffer(
-          (PCHAR)m_send_allocator->ptr(m_send_buf_block),
-          m_send_allocator->block_size() * m_send_allocator->capacity()
-        );
-        if (m_send_buffer->BufferId == RIO_INVALID_BUFFERID) {
-          error(ESocketErrorReason::E_REASON_RESOURCES);
-          s_rio->RIODeregisterBuffer(m_recv_buffer->BufferId);
-          return false;
-        }
-        m_send_buffer->Length = 0;
-        m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
-        m_send_buffer->Pipe = this;
-
-        m_iocp = ::CreateIoCompletionPort((HANDLE)m_socket, NULL, 0, 0);
-        if (m_iocp == NULL) {
-          error(ESocketErrorReason::E_REASON_SOCKET);
-          return false;
-        }
-
-        // Initialize Overlapped structure
-        ::ZeroMemory(&m_overlapped, sizeof(m_overlapped));
-
-        // Create the completion queues and request queues
-        RIO_NOTIFICATION_COMPLETION completion;
-        completion.Type = RIO_IOCP_COMPLETION;
-        completion.Iocp.IocpHandle = m_iocp;
-        completion.Iocp.CompletionKey = (void*)ECompletionKey::E_START;
-        completion.Iocp.Overlapped = &m_overlapped;
-
-        uint32_t queue_size = m_recv_allocator->capacity() + m_send_allocator->capacity();
-
-        m_completion_queue = s_rio->RIOCreateCompletionQueue(queue_size * RIO_PENDING_MAX, &completion);
-        if (m_completion_queue == RIO_INVALID_CQ) {
-          error(ESocketErrorReason::E_REASON_RESOURCES);
-          return false;
-        }
-      }
-
-      m_request_queue = s_rio->RIOCreateRequestQueue(
-        socket_,
-        RIO_PENDING_MAX, 1,
-        RIO_PENDING_MAX, 1,
-        m_completion_queue,
-        m_completion_queue,
-        this
-      );
-
-      m_host_name.resize(INET_ADDRSTRLEN + 1);
-      inet_ntop(AF_INET, &addr.sin_addr, (char*)m_host_name.data(), INET_ADDRSTRLEN);
-
-      m_port = std::to_string(ntohs(addr.sin_port));
-
-      m_socket = socket_;
-      return true;
-    }
-
-    void close() override {
-      if (!m_on_close || !m_on_close(this)) {
-        ::shutdown(m_socket, SD_BOTH);
-        ::closesocket(m_socket);
-
-        m_recv_allocator->deallocate(m_recv_buf_block);
-        m_send_allocator->deallocate(m_send_buf_block);
-
-        if (m_owner_socket_layer) {
-          if (m_request_queue != RIO_INVALID_RQ) {
-            m_request_queue = RIO_INVALID_RQ;
+        for (size_t i = 0; i < m_result_count; ++i) {
+          RIORESULT& result = m_results[i];
+          if (result.Status != NO_ERROR) {
+            return false;
           }
+
+          Tag_RIO_BUF* buf = (Tag_RIO_BUF*)result.RequestContext;
+          ISocketOSSupportLayer* pipe = buf->Pipe;
+
+          if (!cb(pipe, { buf->Operation, result.BytesTransferred })) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+    private:
+      RIORESULT* m_results;
+      size_t m_result_max;
+      size_t m_result_count;
+    };
+
+    class Win32ServerSocketLayer : public ISocketOSSupportLayer {
+    public:
+      Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
+        StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
+        : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
+        m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+        m_socket = INVALID_SOCKET;
+        m_recv_buffer = new Tag_RIO_BUF(
+          RIO_BUFFERID{ RIO_INVALID_BUFFERID },
+          0,
+          0,
+          EPipeOperation::E_RECV,
+          this
+        );
+        m_send_buffer = new Tag_RIO_BUF(
+          RIO_BUFFERID{ RIO_INVALID_BUFFERID },
+          0,
+          0,
+          EPipeOperation::E_SEND,
+          this
+        );
+        m_completion_queue = RIO_INVALID_CQ;
+        m_request_queue = RIO_INVALID_RQ;
+        m_iocp = INVALID_HANDLE_VALUE;
+        m_overlapped = { 0 };
+        m_owner_socket_layer = owner_socker_layer;
+
+        m_protocol = protocol;
+      }
+
+      ~Win32ServerSocketLayer() override {
+        delete m_recv_buffer;
+        delete m_send_buffer;
+
+        if (m_socket != INVALID_SOCKET) {
+          ::shutdown(m_socket, SD_BOTH);
+          ::closesocket(m_socket);
+          m_socket = INVALID_SOCKET;
+        }
+      }
+
+      uint64_t socket() const override {
+        return (uint64_t)m_socket;
+      }
+
+      ETransportLayerProtocol protocol() const override {
+        return m_protocol;
+      }
+
+      bool is_server() const { return true; }
+
+      bool is_ready(EPipeOperation op) const override { return !is_busy(op); }
+
+      bool is_busy(EPipeOperation op) const override {
+        switch (op) {
+        case EPipeOperation::E_NONE:
+          return false;
+        case EPipeOperation::E_RECV:
+          return m_recv_buffer->IsBusy;
+        case EPipeOperation::E_SEND:
+          return m_send_buffer->IsBusy;
+        case EPipeOperation::E_RECV_SEND:
+          return m_recv_buffer->IsBusy || m_send_buffer->IsBusy;
+        }
+        return false;
+      }
+
+      void set_busy(EPipeOperation op, bool busy) override {
+        switch (op) {
+        case EPipeOperation::E_RECV:
+          m_recv_buffer->IsBusy = busy;
+          return;
+        case EPipeOperation::E_SEND:
+          m_send_buffer->IsBusy = busy;
+          return;
+        case EPipeOperation::E_RECV_SEND:
+          m_recv_buffer->IsBusy = busy;
+          m_send_buffer->IsBusy = busy;
+          return;
+        }
+        return;
+      }
+
+      EIOState state(EPipeOperation op) const override {
+        switch (op) {
+        case EPipeOperation::E_NONE:
+          return EIOState::E_NONE;
+        case EPipeOperation::E_RECV:
+          return m_recv_buffer->State;
+        case EPipeOperation::E_SEND:
+          return m_send_buffer->State;
+        case EPipeOperation::E_RECV_SEND:
+          return EIOState::E_NONE;
+        }
+      }
+
+      void signal_io_complete(EPipeOperation op) override {
+        switch (op) {
+        case EPipeOperation::E_NONE:
+          return;
+        case EPipeOperation::E_RECV:
+          m_recv_buffer->State = EIOState::E_COMPLETE;
+        case EPipeOperation::E_SEND:
+          m_send_buffer->State = EIOState::E_COMPLETE;
+        case EPipeOperation::E_RECV_SEND:
+          m_recv_buffer->State = EIOState::E_COMPLETE;
+          m_send_buffer->State = EIOState::E_COMPLETE;
+          return;
+        }
+      }
+
+      bool open(const char* hostname, const char* port) override {
+        Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
+
+        uint64_t socket_ = 0;
+
+        switch (m_protocol) {
+        case ETransportLayerProtocol::E_TCP: {
+          socket_ = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_REGISTERED_IO);
+          if (socket_ == INVALID_SOCKET) {
+            return false;
+          }
+          break;
+        }
+        case ETransportLayerProtocol::E_UDP: {
+          socket_ = ::WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_REGISTERED_IO);
+          if (socket_ == INVALID_SOCKET) {
+            return false;
+          }
+          break;
+        }
+        }
+
+        m_host_name = hostname;
+        m_port = port;
+
+        return open(socket_);
+      }
+
+      bool open(uint64_t socket_) override {
+        Win32ServerSocketLayer* server_pipe = (Win32ServerSocketLayer*)m_owner_socket_layer;
+
+        if (!SocketOSSupportLayerFactory::initialize(socket_)) {
+          return false;
+        }
+
+        int namelen = sizeof(sockaddr_in);
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(atoi(m_port.c_str()));
+        inet_pton(AF_INET, m_host_name.c_str(), &addr.sin_addr);
+
+        ZeroMemory(&m_overlapped, sizeof(OVERLAPPED));
+
+        m_recv_buf_block = m_recv_allocator->allocate();
+        m_send_buf_block = m_send_allocator->allocate();
+
+        int recv_buf_size = m_recv_allocator->block_size();
+        ::setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, (char*)&recv_buf_size, 4);
+
+        int send_buf_size = m_send_allocator->block_size();
+        ::setsockopt(socket_, SOL_SOCKET, SO_SNDBUF, (char*)&send_buf_size, 4);
+
+        if (server_pipe) {
+          // In this circumstance, it is inheriting resources from the server
+          *m_recv_buffer = *server_pipe->m_recv_buffer;
+          m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
+          m_recv_buffer->Pipe = this;
+
+          *m_send_buffer = *server_pipe->m_send_buffer;
+          m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
+          m_send_buffer->Pipe = this;
+
+          m_completion_queue = server_pipe->m_completion_queue;
+          m_iocp = server_pipe->m_iocp;
         }
         else {
-          if (m_completion_queue != RIO_INVALID_CQ) {
-            s_rio->RIOCloseCompletionQueue(m_completion_queue);
-            m_completion_queue = RIO_INVALID_CQ;
+          // In this circumstance, this is the server and it needs new resources
+          m_recv_buffer->BufferId = s_rio->RIORegisterBuffer(
+            (PCHAR)m_recv_allocator->ptr(m_recv_buf_block),
+            m_recv_allocator->block_size() * m_recv_allocator->capacity()
+          );
+          if (m_recv_buffer->BufferId == RIO_INVALID_BUFFERID) {
+            error(ESocketErrorReason::E_REASON_RESOURCES);
+            return false;
           }
+          m_recv_buffer->Length = m_recv_allocator->block_size();
+          m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block);
+          m_recv_buffer->Pipe = this;
 
-          if (m_recv_buffer->BufferId != RIO_INVALID_BUFFERID) {
+          m_send_buffer->BufferId = s_rio->RIORegisterBuffer(
+            (PCHAR)m_send_allocator->ptr(m_send_buf_block),
+            m_send_allocator->block_size() * m_send_allocator->capacity()
+          );
+          if (m_send_buffer->BufferId == RIO_INVALID_BUFFERID) {
+            error(ESocketErrorReason::E_REASON_RESOURCES);
             s_rio->RIODeregisterBuffer(m_recv_buffer->BufferId);
-            m_recv_buffer->BufferId = RIO_INVALID_BUFFERID;
-            m_recv_buf_block = StaticBlockAllocator::INVALID_BLOCK;
+            return false;
+          }
+          m_send_buffer->Length = 0;
+          m_send_buffer->Offset = m_send_allocator->ofs(m_send_buf_block);
+          m_send_buffer->Pipe = this;
+
+          m_iocp = ::CreateIoCompletionPort((HANDLE)m_socket, NULL, 0, 0);
+          if (m_iocp == NULL) {
+            error(ESocketErrorReason::E_REASON_SOCKET);
+            return false;
           }
 
-          if (m_send_buffer->BufferId != RIO_INVALID_BUFFERID) {
-            s_rio->RIODeregisterBuffer(m_send_buffer->BufferId);
-            m_send_buffer->BufferId = RIO_INVALID_BUFFERID;
-            m_send_buf_block = StaticBlockAllocator::INVALID_BLOCK;
-          }
+          // Initialize Overlapped structure
+          ::ZeroMemory(&m_overlapped, sizeof(m_overlapped));
 
-          if (m_iocp) {
-            ::CloseHandle(m_iocp);
-            m_iocp = NULL;
+          // Create the completion queues and request queues
+          RIO_NOTIFICATION_COMPLETION completion;
+          completion.Type = RIO_IOCP_COMPLETION;
+          completion.Iocp.IocpHandle = m_iocp;
+          completion.Iocp.CompletionKey = (void*)ECompletionKey::E_START;
+          completion.Iocp.Overlapped = &m_overlapped;
+
+          uint32_t queue_size = m_recv_allocator->capacity() + m_send_allocator->capacity();
+
+          m_completion_queue = s_rio->RIOCreateCompletionQueue(queue_size * RIO_PENDING_MAX, &completion);
+          if (m_completion_queue == RIO_INVALID_CQ) {
+            error(ESocketErrorReason::E_REASON_RESOURCES);
+            return false;
+          }
+        }
+
+        m_request_queue = s_rio->RIOCreateRequestQueue(
+          socket_,
+          RIO_PENDING_MAX, 1,
+          RIO_PENDING_MAX, 1,
+          m_completion_queue,
+          m_completion_queue,
+          this
+        );
+
+        m_host_name.resize(INET_ADDRSTRLEN + 1);
+        inet_ntop(AF_INET, &addr.sin_addr, (char*)m_host_name.data(), INET_ADDRSTRLEN);
+
+        m_port = std::to_string(ntohs(addr.sin_port));
+
+        m_socket = socket_;
+        return true;
+      }
+
+      void close() override {
+        if (!m_on_close || !m_on_close(this)) {
+          ::shutdown(m_socket, SD_BOTH);
+          ::closesocket(m_socket);
+
+          m_recv_allocator->deallocate(m_recv_buf_block);
+          m_send_allocator->deallocate(m_send_buf_block);
+
+          if (m_owner_socket_layer) {
+            if (m_request_queue != RIO_INVALID_RQ) {
+              m_request_queue = RIO_INVALID_RQ;
+            }
+          }
+          else {
+            if (m_completion_queue != RIO_INVALID_CQ) {
+              s_rio->RIOCloseCompletionQueue(m_completion_queue);
+              m_completion_queue = RIO_INVALID_CQ;
+            }
+
+            if (m_recv_buffer->BufferId != RIO_INVALID_BUFFERID) {
+              s_rio->RIODeregisterBuffer(m_recv_buffer->BufferId);
+              m_recv_buffer->BufferId = RIO_INVALID_BUFFERID;
+              m_recv_buf_block = StaticBlockAllocator::INVALID_BLOCK;
+            }
+
+            if (m_send_buffer->BufferId != RIO_INVALID_BUFFERID) {
+              s_rio->RIODeregisterBuffer(m_send_buffer->BufferId);
+              m_send_buffer->BufferId = RIO_INVALID_BUFFERID;
+              m_send_buf_block = StaticBlockAllocator::INVALID_BLOCK;
+            }
+
+            if (m_iocp) {
+              ::CloseHandle(m_iocp);
+              m_iocp = NULL;
+            }
           }
         }
       }
-    }
 
-    void error(ESocketErrorReason reason) override {
-      if (!m_on_error || !m_on_error(this, reason)) {
-        fprintf(stderr, "Unhandled error (%d)", (int)reason);
+      void error(ESocketErrorReason reason) override {
+        if (!m_on_error || !m_on_error(this, reason)) {
+          fprintf(stderr, "Unhandled error (%d)", (int)reason);
+        }
       }
-    }
 
-    bool notify_all() override {
-      int rc = s_rio->RIONotify(m_completion_queue);
-      if (rc != ERROR_SUCCESS && rc != WSAEALREADY) {
-        error(ESocketErrorReason::E_REASON_CORRUPT);
-        return false;
+      bool notify_all() override {
+        int rc = s_rio->RIONotify(m_completion_queue);
+        if (rc != ERROR_SUCCESS && rc != WSAEALREADY) {
+          error(ESocketErrorReason::E_REASON_CORRUPT);
+          return false;
+        }
+        return true;
       }
-      return true;
-    }
 
-    int64_t sync(EPipeOperation op, uint64_t wait_time) override {
-      if (wait_time == 0) {
+      int64_t sync(EPipeOperation op, uint64_t wait_time) override {
+        if (wait_time == 0) {
+          while (is_busy(op)) {
+            std::this_thread::sleep_for(10ms);
+          }
+          return get_transferred(op);
+        }
+
+        time_point<high_resolution_clock> start_time = high_resolution_clock::now();
         while (is_busy(op)) {
+          time_point<high_resolution_clock> now_time = high_resolution_clock::now();
+          if ((now_time - start_time).count() > (int64_t)wait_time) {
+            return false;
+          }
           std::this_thread::sleep_for(10ms);
         }
+
         return get_transferred(op);
       }
 
-      time_point<high_resolution_clock> start_time = high_resolution_clock::now();
-      while (is_busy(op)) {
-        time_point<high_resolution_clock> now_time = high_resolution_clock::now();
-        if ((now_time - start_time).count() > (int64_t)wait_time) {
+      SocketLock acquire_lock() override {
+        return SocketLock(m_mutex);
+      }
+
+      bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
+        sockaddr_in inaddr;
+        int addr_size = sizeof(sockaddr);
+
+        _WrapperState* state = new _WrapperState;
+        state->m_pipe = this;
+        state->m_cond = accept_cond;
+
+        SOCKET client_socket = ::WSAAccept(m_socket, (sockaddr*)&inaddr, &addr_size, _ServerAcceptCondWrapper, (DWORD_PTR)state);
+        if (client_socket == INVALID_SOCKET) {
           return false;
         }
-        std::this_thread::sleep_for(10ms);
+
+        delete state;
+
+        if (!accept_routine(client_socket)) {
+          ::shutdown(client_socket, SD_BOTH);
+          ::closesocket(client_socket);
+          return false;
+        }
+
+        return true;
       }
 
-      return get_transferred(op);
-    }
+      bool bind_and_listen(const char* addr, uint32_t backlog) override {
+        sockaddr_in server_addr;
+        ::ZeroMemory(&server_addr, sizeof(server_addr));
 
-    SocketLock acquire_lock() override {
-      return SocketLock(m_mutex);
-    }
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = ::htons(atoi(m_port.c_str()));
 
-    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
-      sockaddr_in inaddr;
-      int addr_size = sizeof(sockaddr);
+        if (addr) {
+          inet_pton(server_addr.sin_family, addr, &server_addr.sin_addr);
+        }
+        else {
+          server_addr.sin_addr.s_addr = INADDR_ANY;
+        }
 
-      _WrapperState* state = new _WrapperState;
-      state->m_pipe = this;
-      state->m_cond = accept_cond;
+        if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+          error(ESocketErrorReason::E_REASON_BIND);
+          return false;
+        }
 
-      SOCKET client_socket = ::WSAAccept(m_socket, (sockaddr*)&inaddr, &addr_size, _ServerAcceptCondWrapper, (DWORD_PTR)state);
-      if (client_socket == INVALID_SOCKET) {
+        // -----------------------------
+        // Listen on the socket to allow for an incoming connection
+        if (::listen(m_socket, backlog) == SOCKET_ERROR) {
+          error(ESocketErrorReason::E_REASON_LISTEN);
+          return false;
+        }
+
+        return true;
+      }
+
+      bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
         return false;
       }
 
-      delete state;
+      int32_t recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
+        if (m_recv_buffer->IsBusy) {
+          return 0;
+        }
 
-      if (!accept_routine(client_socket)) {
-        ::shutdown(client_socket, SD_BOTH);
-        ::closesocket(client_socket);
-        return false;
+        m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block) + offset;
+
+        BOOL rc = s_rio->RIOReceive(m_request_queue, m_recv_buffer, 1, NULL, m_recv_buffer);
+        if (rc) {
+          m_recv_buffer->IsBusy = TRUE;
+          m_recv_buffer->State = EIOState::E_ASYNC;
+          return 1;
+        }
+
+        m_recv_buffer->State = EIOState::E_ERROR;
+        return -1;
       }
 
+      int32_t send(const char* data, uint32_t size, uint32_t* flags) override {
+        if (m_send_buffer->IsBusy) {
+          return 0;
+        }
+
+        char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
+        uint32_t block_size = m_send_allocator->block_size();
+        int32_t bytes_sent = 0;
+
+        while (bytes_sent < size) {
+          uint32_t chunk_size = min(size - bytes_sent, block_size);
+          memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
+          m_send_buffer->Length = (ULONG)chunk_size;
+
+          uint32_t flags_ = flags ? *flags : 0;
+
+          BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~IO_FLAG_PARTIAL, m_send_buffer);
+          if (rc) {
+            m_send_buffer->IsBusy = TRUE;
+            bytes_sent += chunk_size;
+            continue;
+          }
+
+          if (bytes_sent == 0) {
+            m_send_buffer->State = EIOState::E_ERROR;
+            return -1;
+          }
+
+          m_send_buffer->State = EIOState::E_PARTIAL;
+          return bytes_sent;
+        }
+
+        m_send_buffer->State = EIOState::E_COMPLETE;
+        return bytes_sent;
+      }
+
+      char* recv_buf() const override {
+        return (char*)m_recv_allocator->ptr(m_recv_buf_block);
+      }
+
+      uint32_t recv_buf_size() const override {
+        return m_recv_allocator->block_size();
+      }
+
+      char* send_buf() const override {
+        return (char*)m_send_allocator->ptr(m_send_buf_block);
+      }
+
+      uint32_t send_buf_size() const override {
+        return m_send_allocator->block_size();
+      }
+
+      void set_recv_buf(char* buf) override {}
+      void set_recv_buf_size(uint32_t size) override {}
+      void set_send_buf(const char* buf) override {}
+      void set_send_buf_size(uint32_t size) override {}
+
+      int64_t get_transferred(EPipeOperation op) {
+        switch (op) {
+        case EPipeOperation::E_RECV:
+          return m_recv_transferred;
+        case EPipeOperation::E_SEND:
+          return m_send_transferred;
+        default:
+          return 0;
+        }
+      }
+
+      void set_transferred(EPipeOperation op, int64_t transferred) {
+        switch (op) {
+        case EPipeOperation::E_RECV:
+          m_recv_transferred = transferred;
+          break;
+        case EPipeOperation::E_SEND:
+          m_send_transferred = transferred;
+          break;
+        default:
+          break;
+        }
+      }
+
+      ISocketIOResult* wait_results() override {
+        return new Win32ServerSocketIOResult(m_iocp, m_completion_queue, 32);
+      }
+
+      void* sys_data() const override { return m_iocp; }
+      void* user_data() const override { return nullptr; }
+
+      void on_close(close_cb cb) { m_on_close = cb; }
+      void on_error(error_cb cb) { m_on_error = cb; }
+
+      void clone_callbacks_from(ISocketOSSupportLayer* other) {
+        Win32ServerSocketLayer* tcp = static_cast<Win32ServerSocketLayer*>(other);
+        m_on_close = tcp->m_on_close;
+        m_on_error = tcp->m_on_error;
+      }
+
+    private:
+      std::string m_host_name;
+      std::string m_port;
+
+      ISocketOSSupportLayer* m_owner_socket_layer;
+      StaticBlockAllocator* m_recv_allocator;
+      StaticBlockAllocator* m_send_allocator;
+      close_cb m_on_close;
+      error_cb m_on_error;
+
+      SOCKET m_socket;
+
+      uint32_t m_recv_buf_block;
+      Tag_RIO_BUF* m_recv_buffer;
+
+      uint32_t m_send_buf_block;
+      Tag_RIO_BUF* m_send_buffer;
+
+      uint32_t m_recv_transferred;
+      uint32_t m_send_transferred;
+
+      RIO_CQ m_completion_queue;
+      RIO_RQ m_request_queue;
+      HANDLE m_iocp;
+      OVERLAPPED m_overlapped;
+
+      ETransportLayerProtocol m_protocol;
+
+      std::mutex m_mutex;
+    };
+
+    bool SocketOSSupportLayerFactory::initialize(uint64_t socket) {
+      return _win32_init_rio(socket) == 0;
+    }
+
+    bool SocketOSSupportLayerFactory::deinitialize() {
+      if (s_rio) {
+        delete s_rio;
+      }
       return true;
     }
 
-    bool bind_and_listen(const char* addr, uint32_t backlog) override {
-      sockaddr_in server_addr;
-      ::ZeroMemory(&server_addr, sizeof(server_addr));
-
-      server_addr.sin_family = AF_INET;
-      server_addr.sin_port = ::htons(atoi(m_port.c_str()));
-
-      if (addr) {
-        inet_pton(server_addr.sin_family, addr, &server_addr.sin_addr);
-      }
-      else {
-        server_addr.sin_addr.s_addr = INADDR_ANY;
-      }
-
-      if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        error(ESocketErrorReason::E_REASON_BIND);
-        return false;
-      }
-
-      // -----------------------------
-      // Listen on the socket to allow for an incoming connection
-      if (::listen(m_socket, backlog) == SOCKET_ERROR) {
-        error(ESocketErrorReason::E_REASON_LISTEN);
-        return false;
-      }
-
-      return true;
-    }
-
-    bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
-      return false;
-    }
-
-    bool recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override {
-      if (m_recv_buffer->IsBusy) {
-        return FALSE;
-      }
-
-      m_recv_buffer->Offset = m_recv_allocator->ofs(m_recv_buf_block) + offset;
-
-      BOOL rc = s_rio->RIOReceive(m_request_queue, m_recv_buffer, 1, NULL, m_recv_buffer);
-      if (rc) {
-        m_recv_buffer->IsBusy = TRUE;
-      }
-      return rc;
-    }
-
-    bool send(const char* data, uint32_t size, uint32_t* flags) override {
-      if (m_send_buffer->IsBusy) {
-        return FALSE;
-      }
-
-      char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
-      uint32_t block_size = m_send_allocator->block_size();
-
-      uint32_t chunk_size = min(size, block_size);
-      memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
-      m_send_buffer->Length = (ULONG)chunk_size;
-
-      uint32_t flags_ = flags ? *flags : 0;
-
-      BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~SKIP_BUF_INIT_FLAG, m_send_buffer);
-      if (rc) {
-        m_send_buffer->IsBusy = TRUE;
-      }
-      return rc;
-    }
-
-    char* recv_buf() const override {
-      return (char*)m_recv_allocator->ptr(m_recv_buf_block);
-    }
-
-    uint32_t recv_buf_size() const override {
-      return m_recv_allocator->block_size();
-    }
-
-    char* send_buf() const override {
-      return (char*)m_send_allocator->ptr(m_send_buf_block);
-    }
-
-    uint32_t send_buf_size() const override {
-      return m_send_allocator->block_size();
-    }
-
-    void set_recv_buf(char* buf) override {}
-    void set_recv_buf_size(uint32_t size) override {}
-    void set_send_buf(const char* buf) override {}
-    void set_send_buf_size(uint32_t size) override {}
-
-    int64_t get_transferred(EPipeOperation op) {
-      switch (op) {
-      case EPipeOperation::E_RECV:
-        return m_recv_transferred;
-      case EPipeOperation::E_SEND:
-        return m_send_transferred;
-      default:
-        return 0;
-      }
-    }
-
-    void set_transferred(EPipeOperation op, int64_t transferred) {
-      switch (op) {
-      case EPipeOperation::E_RECV:
-        m_recv_transferred = transferred;
-        break;
-      case EPipeOperation::E_SEND:
-        m_send_transferred = transferred;
-        break;
-      default:
-        break;
-      }
-    }
-
-    ISocketIOResult* wait_results() override {
-      return new Win32ServerSocketIOResult(m_iocp, m_completion_queue, 32);
-    }
-
-    void* sys_data() const override { return m_iocp; }
-    void* user_data() const override { return nullptr; }
-
-    void on_close(close_cb cb) { m_on_close = cb; }
-    void on_error(error_cb cb) { m_on_error = cb; }
-
-    void clone_callbacks_from(ISocketOSSupportLayer* other) {
-      Win32ServerSocketLayer* tcp = static_cast<Win32ServerSocketLayer*>(other);
-      m_on_close = tcp->m_on_close;
-      m_on_error = tcp->m_on_error;
-    }
-
-  private:
-    std::string m_host_name;
-    std::string m_port;
-
-    ISocketOSSupportLayer* m_owner_socket_layer;
-    StaticBlockAllocator* m_recv_allocator;
-    StaticBlockAllocator* m_send_allocator;
-    close_cb m_on_close;
-    error_cb m_on_error;
-
-    SOCKET m_socket;
-
-    uint32_t m_recv_buf_block;
-    Tag_RIO_BUF* m_recv_buffer;
-
-    uint32_t m_send_buf_block;
-    Tag_RIO_BUF* m_send_buffer;
-
-    uint32_t m_recv_transferred;
-    uint32_t m_send_transferred;
-
-    RIO_CQ m_completion_queue;
-    RIO_RQ m_request_queue;
-    HANDLE m_iocp;
-    OVERLAPPED m_overlapped;
-
-    ETransportLayerProtocol m_protocol;
-
-    std::mutex m_mutex;
-  };
-
-  bool SocketOSSupportLayerFactory::initialize(uint64_t socket) {
-    return _win32_init_rio(socket) == 0;
-  }
-
-  bool SocketOSSupportLayerFactory::deinitialize() {
-    if (s_rio) {
-      delete s_rio;
-    }
-    return true;
-  }
-
-  ISocketOSSupportLayer* SocketOSSupportLayerFactory::create(netpp::ISocketOSSupportLayer* owner_socket_layer,
-    netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, ESocketHint hint) {
+    ISocketOSSupportLayer* SocketOSSupportLayerFactory::create(netpp::ISocketOSSupportLayer* owner_socket_layer,
+      netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, ESocketHint hint) {
 #ifdef _WIN32
-    switch (hint) {
-    case ESocketHint::E_CLIENT:
-      return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
-    case ESocketHint::E_SERVER:
-    default:
-      return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
-    }
+      switch (hint) {
+      case ESocketHint::E_CLIENT:
+        return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+      case ESocketHint::E_SERVER:
+      default:
+        return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+      }
 #else
-    switch (hint) {
-    case ESocketHint::E_CLIENT:
-    default:
-      return nullptr;
-    case ESocketHint::E_SERVER:
-      return nullptr;
-    }
+      switch (hint) {
+      case ESocketHint::E_CLIENT:
+      default:
+        return nullptr;
+      case ESocketHint::E_SERVER:
+        return nullptr;
+      }
 #endif
-  }
+    }
 
 }  // namespace netpp
