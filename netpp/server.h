@@ -166,7 +166,7 @@ namespace netpp {
     char* m_recvbuf;
     uint32_t m_recvbuflen;
 
-    std::mutex m_mutex;
+    std::recursive_mutex m_mutex;
     bool m_stop_flag;
 
     bool m_tls_ssl;

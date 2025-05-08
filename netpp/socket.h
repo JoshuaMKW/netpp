@@ -158,6 +158,20 @@ namespace netpp {
   };
 
   struct SocketProcData {
+    SocketProcData() {
+      m_pipe = nullptr;
+      m_proc_buf = nullptr;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+    }
+
+    SocketProcData(ISocketPipe* pipe) {
+      m_pipe = pipe;
+      m_proc_buf = nullptr;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+    }
+
     ISocketPipe* m_pipe;
     char* m_proc_buf;
     uint32_t m_bytes_processed;

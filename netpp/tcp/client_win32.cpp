@@ -185,7 +185,7 @@ namespace netpp {
       state = m_server_socket.m_pipe->recv(0, nullptr, nullptr);
     }
 
-    while (!m_handshake_done) {
+    while (m_tls_ssl && !m_handshake_done) {
       std::this_thread::sleep_for(16ms);
     }
 
@@ -346,8 +346,14 @@ namespace netpp {
       }
 
       ISocketIOResult* sock_results = server_pipe->wait_results();
-      if (!sock_results || !sock_results->is_valid()) {
+      if (!sock_results) {
         server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+        return 0;
+      }
+
+      if (!sock_results->is_valid()) {
+        server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+        delete sock_results;
         return 0;
       }
 
@@ -369,6 +375,8 @@ namespace netpp {
 
         return client->handle_client_operations(client->m_server_socket, info);
         });
+
+      delete sock_results;
 #endif
     }  // End of while loop
 
@@ -459,7 +467,10 @@ namespace netpp {
     // ---
     if (data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-      data = { nullptr, 0, 0 };
+      data.m_bytes_total = 0;
+      data.m_bytes_processed = 0;
+      delete[] data.m_proc_buf;
+      data.m_proc_buf = nullptr;
       return nullptr;
     }
 
@@ -602,6 +613,7 @@ namespace netpp {
       // incoming data.
       // ---
       data.m_bytes_processed = 0;
+      data.m_bytes_total = 0;
       delete[] data.m_proc_buf;
       data.m_proc_buf = nullptr;
 

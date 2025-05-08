@@ -138,7 +138,7 @@ namespace netpp {
   void TCP_Server::stop() {
     assert(is_startup_thread_cur() && "Server must be stopped on the same thread it was created on.");
     {
-      std::unique_lock<std::mutex> lock(m_mutex);
+      std::scoped_lock<std::recursive_mutex> lock(m_mutex);
       m_stop_flag = true;
     }
     deinitialize();
@@ -146,7 +146,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Request* request) {
     bool result = true;
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
       EIOState state = kv.second.m_pipe->send(request);
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
@@ -159,7 +159,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const HTTP_Response* response) {
     bool result = true;
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
       EIOState state = kv.second.m_pipe->send(response);
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
@@ -172,7 +172,7 @@ namespace netpp {
 
   bool TCP_Server::send_all(const RawPacket* packet) {
     bool result = true;
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
       EIOState state = kv.second.m_pipe->send(packet);
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
@@ -302,7 +302,7 @@ namespace netpp {
   }
 
   void TCP_Server::deinitialize() {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
     if (m_process_thread.joinable()) {
       m_process_thread.join();
@@ -428,7 +428,10 @@ namespace netpp {
     // ---
     if (data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-      data = { nullptr, 0, 0 };
+      data.m_bytes_total = 0;
+      data.m_bytes_processed = 0;
+      delete[] data.m_proc_buf;
+      data.m_proc_buf = nullptr;
       return nullptr;
     }
 
@@ -511,7 +514,7 @@ namespace netpp {
       pipe->get_os_layer()->signal_io_complete(EPipeOperation::E_SEND);
 
       m_pending_auth_sockets.erase(pipe->socket());
-      m_client_sockets[pipe->socket()] = { pipe, nullptr, 0 };
+      m_client_sockets[pipe->socket()] = SocketProcData(pipe);
     }
     else if (auth_state == EAuthState::E_FAILED) {
       m_pending_auth_sockets.erase(pipe->socket());
@@ -571,6 +574,7 @@ namespace netpp {
       // incoming data.
       // ---
       data.m_bytes_processed = 0;
+      data.m_bytes_total = 0;
       delete[] data.m_proc_buf;
       data.m_proc_buf = nullptr;
 
@@ -662,7 +666,7 @@ namespace netpp {
       client_pipe->clone_callbacks_from(m_server_socket);
 
       if (m_tls_ssl) {
-        m_pending_auth_sockets[socket] = { client_pipe, nullptr, 0 };
+        m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
         {
           TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
           SocketLock l = proxy->acquire_lock();
@@ -670,7 +674,7 @@ namespace netpp {
         }
       }
       else {
-        m_client_sockets[socket] = { client_pipe, nullptr, 0 };
+        m_client_sockets[socket] = SocketProcData(client_pipe);
       }
     }
   }
@@ -685,7 +689,7 @@ namespace netpp {
   }
 
   void TCP_Server::receive_on_sockets() {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
     for (auto& socket : m_client_sockets) {
       ISocketPipe* pipe = socket.second.m_pipe;
@@ -714,7 +718,7 @@ namespace netpp {
 
     while (server->is_running()) {
       bool success = server->m_server_socket->accept(nullptr, [server](uint64_t socket) {
-        std::unique_lock<std::mutex> lock(server->m_mutex);
+        std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
         ISocketPipe* client_pipe = new TCP_Socket(
           server->m_server_socket->get_os_layer(), &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
@@ -727,7 +731,7 @@ namespace netpp {
         client_pipe->clone_callbacks_from(server->m_server_socket);
 
         if (server->m_tls_ssl) {
-          server->m_pending_auth_sockets[socket] = { client_pipe, nullptr, 0 };
+          server->m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
           {
             TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
             {
@@ -738,7 +742,7 @@ namespace netpp {
           }
         }
         else {
-          server->m_client_sockets[socket] = { client_pipe, nullptr, 0 };
+          server->m_client_sockets[socket] = SocketProcData(client_pipe);
         }
 
         return true;
@@ -779,9 +783,21 @@ namespace netpp {
         goto exit_thread;
       }
 
-      std::unique_lock<std::mutex> lock(server->m_mutex);
+      if (!sock_results->is_valid()) {
+        server->m_server_socket->error(ESocketErrorReason::E_REASON_CORRUPT);
+        delete sock_results;
+        goto exit_thread;
+      }
+
+      std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+        bool is_disconnect = info.m_bytes_transferred == 0;
+        if (is_disconnect) {
+          pipe->close();
+          return true;
+        }
+
         if (server->m_client_sockets.find(pipe->socket()) == server->m_client_sockets.end()) {
           if (server->m_pending_auth_sockets.find(pipe->socket()) == server->m_pending_auth_sockets.end()) {
             return false;
@@ -791,6 +807,8 @@ namespace netpp {
 
         return server->handle_client_operations(server->m_client_sockets[pipe->socket()], info);
         });  // End of completion for loop
+
+      delete sock_results;
     }  // End of while loop
 
   exit_thread:
@@ -802,7 +820,7 @@ namespace netpp {
 
     while (server->is_running()) {
       if (server->m_purgatory_sockets.size() > 0) {
-        std::unique_lock<std::mutex> lock(server->m_mutex);
+        std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
         uint64_t socket = server->m_purgatory_sockets.front();
         server->m_purgatory_sockets.pop();

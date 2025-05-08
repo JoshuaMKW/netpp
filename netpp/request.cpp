@@ -85,7 +85,7 @@ namespace netpp {
 
     for (uint32_t i = 0; i < buflen - 3; i++) {
       if (http_buf[i] == 'H' && http_buf[i + 1] == 'T' && http_buf[i + 2] == 'T' && http_buf[i + 3] == 'P') {
-        is_http = i > 6;
+        is_http = i > 5;
         break;
       }
 

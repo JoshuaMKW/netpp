@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
   printf("Enter your name: ");
   std::getline(std::cin, client_name);
 
-  TCP_Client client(true, "./cert/key.pem", "./cert/cert.pem", 65536);
+  TCP_Client client(false, "./cert/key.pem", "./cert/cert.pem", 65536);
   InputHandler msg_handler(client_name);
 
   bool sent_message = false;

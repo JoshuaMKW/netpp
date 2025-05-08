@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(true, "./cert/key.pem", "./cert/cert.pem");
+  TCP_Server server(false, "./cert/key.pem", "./cert/cert.pem");
 
   std::ofstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt", std::ios_base::app);
   if (!history_file.is_open()) {
@@ -76,6 +76,17 @@ int main(int argc, char** argv) {
       response->add_header("Content-Type: text/html; charset=UTF-8");
       response->add_header("Connection: keep-alive");
       response->set_body(html_content);
+      return response;
+    }
+    else if (request->path() == "/index.css") {
+      std::ifstream css_file("./index.css");
+      std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
+
+      HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
+      response->set_version("1.1");
+      response->add_header("Content-Type: text/css; charset=UTF-8");
+      response->add_header("Connection: keep-alive");
+      response->set_body(css_content);
       return response;
     }
     else if (request->path() == "/history") {

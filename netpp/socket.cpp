@@ -232,10 +232,10 @@ namespace netpp {
     Win32ClientSocketIOResult(ISocketOSSupportLayer* pipe, LPWSAOVERLAPPED recv_overlapped, LPWSAOVERLAPPED send_overlapped)
       : m_pipe(pipe), m_recv_bytes(0), m_send_bytes(0) {
       DWORD transferred_, flags_;
-      ULONG_PTR completion_key;
 
 #ifdef CLIENT_USE_WSA
 #if 0
+      ULONG_PTR completion_key;
       bool success = GetQueuedCompletionStatus(iocp, &transferred_, &completion_key, &overlapped, INFINITE);
       if (!success) {
         return;
@@ -1083,6 +1083,7 @@ namespace netpp {
       EIOState state(EPipeOperation op) const override {
         switch (op) {
         case EPipeOperation::E_NONE:
+        default:
           return EIOState::E_NONE;
         case EPipeOperation::E_RECV:
           return m_recv_buffer->State;
@@ -1096,11 +1097,14 @@ namespace netpp {
       void signal_io_complete(EPipeOperation op) override {
         switch (op) {
         case EPipeOperation::E_NONE:
+        default:
           return;
         case EPipeOperation::E_RECV:
           m_recv_buffer->State = EIOState::E_COMPLETE;
+          return;
         case EPipeOperation::E_SEND:
           m_send_buffer->State = EIOState::E_COMPLETE;
+          return;
         case EPipeOperation::E_RECV_SEND:
           m_recv_buffer->State = EIOState::E_COMPLETE;
           m_send_buffer->State = EIOState::E_COMPLETE;
