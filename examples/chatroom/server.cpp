@@ -7,10 +7,9 @@
 #include "socket.h"
 #include "server.h"
 
-#pragma comment(lib, "netpp.lib")
+#include "common.h"
 
-#define SERVER_IPV4 network_ipv4()
-#define SERVER_PORT "8080"
+#pragma comment(lib, "netpp.lib")
 
 using namespace netpp;
 
@@ -40,18 +39,17 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(false, "./cert/key.pem", "./cert/cert.pem");
-
-  std::ofstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt", std::ios_base::app);
+  std::ofstream history_file("./_chat_history.txt", std::ios_base::app);
   if (!history_file.is_open()) {
     fprintf(stderr, "Failed to open history file\n");
     return 1;
   }
 
+  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT);
+
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  }
-  else {
+  } else {
     fprintf(stderr, "Failed to start the server\n");
     return 1;
   }
