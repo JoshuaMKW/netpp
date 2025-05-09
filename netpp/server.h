@@ -9,8 +9,8 @@
 #include "netpp.h"
 #include "allocator.h"
 #include "network.h"
-#include "response.h"
-#include "request.h"
+#include "http/request.h"
+#include "http/response.h"
 #include "socket.h"
 
 namespace netpp {

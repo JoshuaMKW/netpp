@@ -14,13 +14,13 @@ find_package(OpenSSL REQUIRED)
 add_library(netpp STATIC
     allocator.cpp
     client.cpp
-    client_adapter.cpp
+    
     network.cpp
     protocol.cpp
-    request.cpp
-    response.cpp
+    "http/request.cpp"
+    "http/response.cpp"
     server.cpp
-    server_adapter.cpp
+    
     socket.cpp
     tls/socket_layer.cpp
     tcp/socket_win32.cpp

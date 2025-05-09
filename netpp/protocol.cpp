@@ -1,6 +1,6 @@
 #include "protocol.h"
-#include "request.h"
-#include "response.h"
+#include "http/request.h"
+#include "http/response.h"
 #include "socket.h"
 
 namespace netpp {

@@ -19,8 +19,8 @@
 #include "allocator.h"
 #include "network.h"
 #include "protocol.h"
-#include "request.h"
-#include "response.h"
+#include "http/request.h"
+#include "http/response.h"
 
 #include <openssl\ssl.h>
 
