@@ -14,14 +14,16 @@
 
 using namespace std::chrono_literals;
 
-#define NETPP_USE_CERTIFICATES 0
+#ifndef NETPP_SKIP_TLS_CERT_VERIFY
+#define NETPP_SKIP_TLS_CERT_VERIFY 0
+#endif
 
-#if NETPP_USE_CERTIFICATES
-#define SERVER_VERIFY_CONFIG SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
-#define CLIENT_VERIFY_CONFIG SSL_VERIFY_PEER
-#else
+#if NETPP_SKIP_TLS_CERT_VERIFY
 #define SERVER_VERIFY_CONFIG SSL_VERIFY_NONE
 #define CLIENT_VERIFY_CONFIG SSL_VERIFY_NONE
+#else
+#define SERVER_VERIFY_CONFIG SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
+#define CLIENT_VERIFY_CONFIG SSL_VERIFY_PEER
 #endif
 
 namespace netpp {
@@ -292,6 +294,17 @@ namespace netpp {
 
     while (proc_state == EProcState::E_READY) {
     update_handshake:
+      const char* state = SSL_state_string_long(m_ssl);
+      const char* rstate = SSL_rstate_string_long(m_ssl);
+
+      if (state) {
+        fprintf(stdout, "SSL state: %s\n", state);
+      }
+
+      if (rstate) {
+        fprintf(stdout, "SSL rstate: %s\n", rstate);
+      }
+
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully

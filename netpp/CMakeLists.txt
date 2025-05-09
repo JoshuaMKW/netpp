@@ -14,20 +14,22 @@ find_package(OpenSSL REQUIRED)
 add_library(netpp STATIC
     allocator.cpp
     client.cpp
-    
     network.cpp
     protocol.cpp
-    "http/request.cpp"
-    "http/response.cpp"
     server.cpp
-    
     socket.cpp
+
+    http/request.cpp
+    http/response.cpp
+
     tls/socket_layer.cpp
+
     tcp/socket_win32.cpp
     tcp/client_unix.cpp
     tcp/client_win32.cpp
     tcp/server_unix.cpp
     tcp/server_win32.cpp
+
     UDP/client_unix.cpp
     UDP/client_win32.cpp
     UDP/server_unix.cpp
@@ -49,9 +51,14 @@ target_link_libraries(netpp PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(netpp PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_EXPORTS;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_EXPORTS;NETPP_STATIC;>
     $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
 )
+
+if (NETPP_SKIP_TLS_CERT_VERIFY)
+    message(STATUS "Skipping TLS certificate verification.")
+    target_compile_definitions(netpp PRIVATE NETPP_SKIP_TLS_CERT_VERIFY)
+endif()
 
 # Set output directories
 set_target_properties(netpp PROPERTIES
