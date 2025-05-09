@@ -103,6 +103,14 @@ namespace netpp {
     }
     else {
       SSL_CTX_set_verify(m_tls_ctx, CLIENT_VERIFY_CONFIG, NULL);
+
+      // Load the server's certificate as a trusted CA
+      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file, NULL) < 1) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return;
+      }
     }
   }
 
