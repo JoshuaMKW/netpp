@@ -275,7 +275,7 @@ namespace netpp {
     static bool initialize(uint64_t socket);
     static ISocketOSSupportLayer* create(netpp::ISocketOSSupportLayer* owner_socker_layer,
       netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator,
-      ETransportLayerProtocol protocol, ESocketHint hint);
+      ETransportLayerProtocol protocol, ESocketHint hint, void* user_data = nullptr);
     static bool deinitialize();
   };
 
@@ -376,7 +376,7 @@ namespace netpp {
   /// </summary>
   class NETPP_API TCP_Socket : public ISocketPipe {
   public:
-    TCP_Socket(ISocketOSSupportLayer* owner_socket_layer,
+    TCP_Socket(ISocketPipe* root_socket,
       StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint = ESocketHint::E_NONE);
 
     ~TCP_Socket() override {}
@@ -422,13 +422,15 @@ namespace netpp {
     EIOState send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override {
-      m_socket_layer->on_close([this, cb](ISocketOSSupportLayer*) {
-        return cb(this);
+      m_socket_layer->on_close([this, cb](ISocketOSSupportLayer* os_layer) {
+        TCP_Socket* the_socket = reinterpret_cast<TCP_Socket*>(os_layer->user_data());
+        return cb(the_socket);
         });
     }
     void on_error(error_cb cb) override {
-      m_socket_layer->on_error([this, cb](ISocketOSSupportLayer*, ESocketErrorReason reason) {
-        return cb(this, reason);
+      m_socket_layer->on_error([this, cb](ISocketOSSupportLayer* os_layer, ESocketErrorReason reason) {
+        TCP_Socket* the_socket = reinterpret_cast<TCP_Socket*>(os_layer->user_data());
+        return cb(the_socket, reason);
         });
     }
 
@@ -703,22 +705,6 @@ namespace netpp {
 
     Internally uses OpenSSL
     */
-
-    bool recv_client_hello();
-    bool recv_server_hello();
-
-    bool send_client_hello();
-    bool send_server_hello();
-
-    bool send_server_certificate();
-
-    bool send_client_key_exchange();
-
-    bool recv_change_cipher_spec();
-    bool send_change_cipher_spec();
-
-    bool send_finished();
-    bool recv_finished();
 
     EAuthState ssl_advance_handshake(EPipeOperation last_op, int32_t post_transferred);
 

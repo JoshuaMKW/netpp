@@ -346,6 +346,8 @@ namespace netpp {
       request_str += "Content-Length: " + std::to_string(body.length()) + "\r\n";
       request_str += "\r\n";
       request_str += body;
+    } else {
+      request_str += "\r\n";
     }
 
     return request_str;
@@ -356,7 +358,7 @@ namespace netpp {
 
     //--------------------------------------------------------------
     // Calculate the size of the buffer
-    size_t http_size = 9;  // 2 spaces, 1 carriage return, 1 newline, HTTP/
+    size_t http_size = 4;  // 2 spaces, 1 carriage return, 1 newline, HTTP/
     const char* request_str = http_request_str(request.method());
 
     http_size += strlen(request_str);
@@ -380,9 +382,11 @@ namespace netpp {
       }
 
       http_size += 18;  // Content-Length: \r\n
-      http_size += body.length() + 2;
+      http_size += body.length();
     }
     //--------------------------------------------------------------
+
+    http_size += 2;  // "\r\n" (end of headers)
 
     char* buf_out = new char[http_size];
     
@@ -435,12 +439,8 @@ namespace netpp {
       size_t body_len = body.length();
       memcpy(buf_out + offset, body.c_str(), body_len);
       offset += body_len;
-      *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
-      offset += 2;
     }
 
-    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
-    offset += 2;
     //--------------------------------------------------------------
 
     *size_out = static_cast<uint32_t>(http_size);

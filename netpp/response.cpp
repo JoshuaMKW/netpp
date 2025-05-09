@@ -217,6 +217,9 @@ namespace netpp {
       response_str += "\r\n";
       response_str += body;
     }
+    else {
+      response_str += "\r\n";
+    }
 
     return response_str;
   }
@@ -250,7 +253,7 @@ namespace netpp {
       }
 
       response_size += 18;  // Content-Length: \r\n
-      response_size += body.length() + 2;
+      response_size += body.length();
     }
 
     response_size += 2;  // "\r\n" (end of headers)
@@ -322,8 +325,6 @@ namespace netpp {
       size_t body_len = body.length();
       memcpy_s(response_buf + offset, response_size, body.c_str(), body_len);
       offset += body_len;
-      *(uint16_t*)((uint8_t*)response_buf + offset) = '\r\n';
-      offset += 2;
     }
     //-------------------------------------------------------------
 

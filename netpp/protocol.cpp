@@ -56,12 +56,12 @@ namespace netpp {
   uint32_t HTTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
     if (const char* h_end = HTTP_Request::header_end(data, size)) {
       uint32_t content_length = HTTP_Request::content_length(data, size);
-      return ((uint32_t)(h_end - data) + 4) + (content_length ? content_length + 2 : 0);
+      return ((uint32_t)(h_end - data) + 4) + content_length;
     }
 
     if (const char* h_end = HTTP_Response::header_end(data, size)) {
       uint32_t content_length = HTTP_Response::content_length(data, size);
-      return ((uint32_t)(h_end - data) + 4) + (content_length ? content_length + 2 : 0);
+      return ((uint32_t)(h_end - data) + 4) + content_length;
     }
     return 0;
   }

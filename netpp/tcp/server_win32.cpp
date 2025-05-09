@@ -12,6 +12,10 @@
 
 #define SKIP_BUF_INIT_FLAG 0x80000000
 
+#ifndef WANTS_EXPLICIT_AUTH_SYNC
+#define WANTS_EXPLICIT_AUTH_SYNC false
+#endif
+
 namespace netpp {
 
   template <typename TV, typename TM>
@@ -496,6 +500,7 @@ namespace netpp {
 
     EAuthState auth_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
     if (auth_state == EAuthState::E_AUTHENTICATED) {
+#if WANTS_EXPLICIT_AUTH_SYNC
       const char* data = "--AUTHENTICATED--";
       EIOState state = pipe->send(data, 18, nullptr);
 
@@ -512,6 +517,7 @@ namespace netpp {
       }
 
       pipe->get_os_layer()->signal_io_complete(EPipeOperation::E_SEND);
+#endif
 
       m_pending_auth_sockets.erase(pipe->socket());
       m_client_sockets[pipe->socket()] = SocketProcData(pipe);
@@ -656,7 +662,7 @@ namespace netpp {
       m_awaiting_sockets.pop();
 
       ISocketPipe* client_pipe = new TCP_Socket(
-        m_server_socket->get_os_layer(), &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+        m_server_socket, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
 
       if (m_tls_ssl) {
         client_pipe = new TLS_SocketProxy(client_pipe, m_key_file, m_cert_file);
@@ -721,7 +727,7 @@ namespace netpp {
         std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
         ISocketPipe* client_pipe = new TCP_Socket(
-          server->m_server_socket->get_os_layer(), &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
+          server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
 
         if (server->m_tls_ssl) {
           client_pipe = new TLS_SocketProxy(client_pipe, server->m_key_file, server->m_cert_file);
@@ -831,9 +837,10 @@ namespace netpp {
 
         SocketProcData& sock_data = server->m_client_sockets[socket];
         if (sock_data.m_pipe) {
+          delete sock_data.m_pipe;
+
           // Pipe cleaned itself up earlier by the call to close
           server->m_client_sockets.erase(socket);
-          delete sock_data.m_pipe;
         }
 
         if (server->m_socket_threads.find(socket) != server->m_socket_threads.end()) {

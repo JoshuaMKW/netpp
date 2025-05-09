@@ -81,3 +81,14 @@ set_target_properties(ChatClient PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Application/Chatroom
     RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Application/Chatroom
 )
+
+# Copy the cert files to the output directory
+file(GLOB CERT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/cert/*")
+foreach(CERT_FILE ${CERT_FILES})
+    get_filename_component(CERT_FILE_NAME ${CERT_FILE} NAME)
+    add_custom_command(TARGET ChatServer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CERT_FILE}"
+        "${CMAKE_BINARY_DIR}/Application/Chatroom/cert/${CERT_FILE_NAME}"
+    )
+endforeach()

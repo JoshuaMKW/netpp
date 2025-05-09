@@ -271,13 +271,17 @@ namespace netpp {
         return false;
       }
 
+      bool result = true;
+
       if (m_recv_bytes > 0) {
-        cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
       }
 
       if (m_send_bytes > 0) {
-        cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
       }
+
+      return result;
     }
 
   private:
@@ -289,7 +293,7 @@ namespace netpp {
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
   public:
     Win32ClientSocketLayer(ISocketOSSupportLayer* owner_socket_layer,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, void* user_data = nullptr)
       : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
       m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK),
       m_recv_transferred(0), m_send_transferred(0) {
@@ -320,7 +324,11 @@ namespace netpp {
       m_owner_socket_layer = owner_socket_layer;
       m_connected = false;
       m_protocol = protocol;
+
+      ConnectEx = nullptr;
       DisconnectEx = nullptr;
+
+      m_user_data = user_data;
     }
 
     ~Win32ClientSocketLayer() override {
@@ -381,6 +389,7 @@ namespace netpp {
     EIOState state(EPipeOperation op) const override {
       switch (op) {
       case EPipeOperation::E_NONE:
+      default:
         return EIOState::E_NONE;
       case EPipeOperation::E_RECV:
         return m_recv_buffer->State;
@@ -394,6 +403,7 @@ namespace netpp {
     void signal_io_complete(EPipeOperation op) override {
       switch (op) {
       case EPipeOperation::E_NONE:
+      default:
         return;
       case EPipeOperation::E_RECV:
         m_recv_buffer->State = EIOState::E_COMPLETE;
@@ -875,7 +885,7 @@ namespace netpp {
       }
 
       void* sys_data() const override { return m_iocp; }
-      void* user_data() const override { return nullptr; }
+      void* user_data() const override { return m_user_data; }
 
       void on_close(close_cb cb) { m_on_close = cb; }
       void on_error(error_cb cb) { m_on_error = cb; }
@@ -920,6 +930,8 @@ namespace netpp {
     ETransportLayerProtocol m_protocol;
 
     std::mutex m_mutex;
+
+    void* m_user_data;
   };
 
     struct Tag_RIO_BUF : public RIO_BUF {
@@ -1000,7 +1012,7 @@ namespace netpp {
     class Win32ServerSocketLayer : public ISocketOSSupportLayer {
     public:
       Win32ServerSocketLayer(ISocketOSSupportLayer* owner_socker_layer,
-        StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol)
+        StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, void* user_data = nullptr)
         : m_recv_allocator(recv_allocator), m_send_allocator(send_allocator),
         m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
         m_socket = INVALID_SOCKET;
@@ -1025,6 +1037,8 @@ namespace netpp {
         m_owner_socket_layer = owner_socker_layer;
 
         m_protocol = protocol;
+
+        m_user_data = user_data;
       }
 
       ~Win32ServerSocketLayer() override {
@@ -1486,7 +1500,7 @@ namespace netpp {
       }
 
       void* sys_data() const override { return m_iocp; }
-      void* user_data() const override { return nullptr; }
+      void* user_data() const override { return m_user_data; }
 
       void on_close(close_cb cb) { m_on_close = cb; }
       void on_error(error_cb cb) { m_on_error = cb; }
@@ -1526,6 +1540,8 @@ namespace netpp {
       ETransportLayerProtocol m_protocol;
 
       std::mutex m_mutex;
+
+      void* m_user_data;
     };
 
     bool SocketOSSupportLayerFactory::initialize(uint64_t socket) {
@@ -1540,14 +1556,14 @@ namespace netpp {
     }
 
     ISocketOSSupportLayer* SocketOSSupportLayerFactory::create(netpp::ISocketOSSupportLayer* owner_socket_layer,
-      netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, ESocketHint hint) {
+      netpp::StaticBlockAllocator* recv_allocator, netpp::StaticBlockAllocator* send_allocator, ETransportLayerProtocol protocol, ESocketHint hint, void* user_data) {
 #ifdef _WIN32
       switch (hint) {
       case ESocketHint::E_CLIENT:
-        return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+        return new Win32ClientSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol, user_data);
       case ESocketHint::E_SERVER:
       default:
-        return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol);
+        return new Win32ServerSocketLayer(owner_socket_layer, recv_allocator, send_allocator, protocol, user_data);
       }
 #else
       switch (hint) {

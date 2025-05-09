@@ -215,9 +215,10 @@ namespace netpp {
     }
 
     int bytes = SSL_read(m_ssl, out_data, out_size);
-    if (bytes > 0) {
+    if (bytes >= 0) {
       return bytes;
-    } else {
+    }
+    else {
       unsigned long err = ERR_get_error();
       fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
     }
@@ -274,46 +275,6 @@ namespace netpp {
     return ssl_advance_handshake(last_op, post_transferred);
   }
 
-  bool TLS_SocketProxy::recv_client_hello() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::recv_server_hello() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_client_hello() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_server_hello() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_server_certificate() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_client_key_exchange() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::recv_change_cipher_spec() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_change_cipher_spec() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::send_finished() {
-    return false;
-  }
-
-  bool TLS_SocketProxy::recv_finished() {
-    return false;
-  }
-
   EAuthState TLS_SocketProxy::ssl_advance_handshake(EPipeOperation last_op, int32_t post_transferred) {
     int result = 0;
     int32_t recv_transferred = last_op == EPipeOperation::E_RECV ? post_transferred : 0;
@@ -330,6 +291,7 @@ namespace netpp {
     int32_t transferring = 0;
 
     while (proc_state == EProcState::E_READY) {
+    update_handshake:
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully
@@ -349,47 +311,28 @@ namespace netpp {
 
       int err = SSL_get_error(m_ssl, result);
       if (err == SSL_ERROR_WANT_READ) {
-        if (wants_recv) {
-          proc_state = handshake_recv_state(0);
-        } else if (is_server()) {
-          if (!m_handshake_initiated) {
-            proc_state = handshake_recv_state(0);
-          } else if (send_transferred > 0) {
-            proc_state = handshake_recv_state(0);
-          } else if (recv_transferred > 0) {
-            proc_state = handshake_recv_state(recv_transferred);
-          } else {
-            proc_state = handshake_send_state(0, &transferring);
-            wants_recv = transferring > 0;
-          }
-        } else {
-          if (!m_handshake_initiated) {
-            proc_state = handshake_send_state(0, &transferring);
-          } else if (send_transferred > 0) {
-            proc_state = handshake_recv_state(0);
-          } else if (recv_transferred > 0) {
-            proc_state = handshake_recv_state(recv_transferred);
-          } else {
-            proc_state = handshake_send_state(0, &transferring);
-            wants_recv = transferring > 0;
-          }
-        }
-      } else if (err == SSL_ERROR_WANT_WRITE) {
+        proc_state = handshake_recv_state(recv_transferred);
+        handshake_send_state(0, &transferring);
+      }
+      else if (err == SSL_ERROR_WANT_WRITE) {
         if (is_server()) {
           proc_state = handshake_send_state(send_transferred, &transferring);
           wants_recv = transferring > 0;
-        } else {
+        }
+        else {
           proc_state = handshake_send_state(send_transferred, &transferring);
           wants_recv = transferring > 0;
         }
-      } else {
+      }
+      else {
         int ssl_err = SSL_get_error(m_ssl, result);
 
         if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
           unsigned long err = ERR_get_error();
           if (err == 0) {
             fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
-          } else {
+          }
+          else {
             fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
           }
         }
@@ -407,7 +350,7 @@ namespace netpp {
     return m_handshake_state;
   }
 
-  TLS_SocketProxy::EProcState TLS_SocketProxy::handshake_send_state(int32_t post_transferred, int32_t *out_transferring) {
+  TLS_SocketProxy::EProcState TLS_SocketProxy::handshake_send_state(int32_t post_transferred, int32_t* out_transferring) {
     uint32_t send_buf_size = get_os_layer()->send_buf_size();
     char* tls_out = new char[send_buf_size];
 
@@ -422,7 +365,7 @@ namespace netpp {
       EIOState state = m_pipe->send(tls_out, bytes_to_send, &flags_);
 
       delete[] tls_out;
-      
+
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
         *out_transferring = -1;
         return EProcState::E_FAILED;
@@ -431,7 +374,7 @@ namespace netpp {
       *out_transferring = bytes_to_send;
       return EProcState::E_READY;
     }
-    
+
     delete[] tls_out;
 
     *out_transferring = 0;
@@ -461,7 +404,8 @@ namespace netpp {
     EIOState state = m_pipe->recv(0, &flags_, &tmp_);
     if (state == EIOState::E_ERROR) {
       return EProcState::E_FAILED;
-    } else {
+    }
+    else {
       return EProcState::E_WAITING;
     }
   }

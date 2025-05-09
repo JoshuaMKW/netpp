@@ -9,8 +9,6 @@
 
 #include "common.h"
 
-#pragma comment(lib, "netpp.lib")
-
 using namespace netpp;
 
 struct MessagePacket {
@@ -65,29 +63,7 @@ int main(int argc, char** argv) {
       return response;
     }
 
-    if (request->path() == "/") {
-      std::ifstream html_file("./index.html");
-      std::string html_content((std::istreambuf_iterator<char>(html_file)), std::istreambuf_iterator<char>());
-
-      HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
-      response->set_version("1.1");
-      response->add_header("Content-Type: text/html; charset=UTF-8");
-      response->add_header("Connection: keep-alive");
-      response->set_body(html_content);
-      return response;
-    }
-    else if (request->path() == "/index.css") {
-      std::ifstream css_file("./index.css");
-      std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
-
-      HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
-      response->set_version("1.1");
-      response->add_header("Content-Type: text/css; charset=UTF-8");
-      response->add_header("Connection: keep-alive");
-      response->set_body(css_content);
-      return response;
-    }
-    else if (request->path() == "/history") {
+    if (request->path() == "/history") {
       std::ifstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt");
       if (history_file.is_open()) {
         std::string history_content((std::istreambuf_iterator<char>(history_file)), std::istreambuf_iterator<char>());

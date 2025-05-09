@@ -1,14 +1,10 @@
 #include <iostream>
 
-#include "inputhandler.h"
-#include "socket.h"
 #include "client.h"
+#include "socket.h"
 
-#pragma comment(lib, "netpp.lib")
-
-//#define SERVER_IPV4 "47.222.169.75"
-#define SERVER_IPV4 network_ipv4()
-#define SERVER_PORT "8080"
+#include "common.h"
+#include "inputhandler.h"
 
 using namespace netpp;
 
@@ -76,7 +72,7 @@ int main(int argc, char** argv) {
   printf("Enter your name: ");
   std::getline(std::cin, client_name);
 
-  TCP_Client client(false, "./cert/key.pem", "./cert/cert.pem", 65536);
+  TCP_Client client(true, SERVER_KEY, SERVER_CERT, 65536);
   InputHandler msg_handler(client_name);
 
   bool sent_message = false;

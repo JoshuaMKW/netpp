@@ -13,6 +13,10 @@ using namespace std::chrono_literals;
 #define RIO_PENDING_MAX 5
 #define RIO_MAX_BUFFERS 1024
 
+#ifndef WANTS_EXPLICIT_AUTH_SYNC
+#define WANTS_EXPLICIT_AUTH_SYNC false
+#endif
+
 template <typename TV, typename TM>
 inline TV RoundDown(TV Value, TM Multiple)
 {
@@ -27,7 +31,8 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t desired_bufsize) : m_recv_spec(), m_send_spec() {
+  TCP_Client::TCP_Client(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t desired_bufsize)
+    : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE) {
     m_tls_ssl = use_tls_ssl;
 
     m_error = EClientError::E_NONE;
@@ -534,6 +539,7 @@ namespace netpp {
     }
 
     if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
+#if WANTS_EXPLICIT_AUTH_SYNC
       if (info.m_operation != EPipeOperation::E_RECV) {
         return true;
       }
@@ -552,6 +558,9 @@ namespace netpp {
       }
 
       delete[] proc_out;
+#else
+      m_handshake_done = true;
+#endif
       return true;
     }
 

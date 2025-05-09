@@ -14,13 +14,17 @@ using namespace std::chrono_literals;
 
 namespace netpp {
 
-  TCP_Socket::TCP_Socket(ISocketOSSupportLayer * owner_socket_layer,
+  TCP_Socket::TCP_Socket(ISocketPipe* root_socket,
     StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint)
     : m_hint(hint), m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+    ISocketOSSupportLayer* layer = nullptr;
+    if (root_socket) {
+      layer = root_socket->get_os_layer();
+    }
     m_socket_layer = SocketOSSupportLayerFactory::create(
-      owner_socket_layer,
+      layer,
       recv_allocator, send_allocator,
-      ETransportLayerProtocol::E_TCP, hint
+      ETransportLayerProtocol::E_TCP, hint, this
     );
   }
 
@@ -97,7 +101,7 @@ namespace netpp {
     SocketIOState& io_state = m_io_info.m_send_state;
 
     EIOState last_state = m_socket_layer->state(EPipeOperation::E_SEND);
-    
+
     if (last_state == EIOState::E_PARTIAL) {
       if (!flags || (*flags & IO_FLAG_PARTIAL) == 0) {
         // The socket is busy, call again
