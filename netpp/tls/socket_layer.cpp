@@ -302,17 +302,6 @@ namespace netpp {
 
     while (proc_state == EProcState::E_READY) {
     update_handshake:
-      const char* state = SSL_state_string_long(m_ssl);
-      const char* rstate = SSL_rstate_string_long(m_ssl);
-
-      if (state) {
-        fprintf(stdout, "SSL state: %s\n", state);
-      }
-
-      if (rstate) {
-        fprintf(stdout, "SSL rstate: %s\n", rstate);
-      }
-
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully

@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     }
 
     if (request->path() == "/history") {
-      std::ifstream history_file("C:/Users/Kyler-Josh/Desktop/_chat_history.txt");
+      std::ifstream history_file("./_chat_history.txt");
       if (history_file.is_open()) {
         std::string history_content((std::istreambuf_iterator<char>(history_file)), std::istreambuf_iterator<char>());
 
