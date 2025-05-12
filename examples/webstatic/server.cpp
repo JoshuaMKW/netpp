@@ -14,7 +14,7 @@ using namespace std::chrono_literals;
 
 #define SERVER_IPV4 "0.0.0.0"
 
-#define SERVER_USE_TLS false
+#define SERVER_USE_TLS true
 
 #if SERVER_USE_TLS
 #define SERVER_CERT "./cert/cert.pem"

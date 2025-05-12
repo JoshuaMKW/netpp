@@ -374,8 +374,6 @@ namespace netpp {
       uint32_t flags_ = 0;
       EIOState state = m_pipe->send(tls_out, bytes_to_send, &flags_);
 
-      delete[] tls_out;
-
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
         *out_transferring = -1;
         return EProcState::E_FAILED;
