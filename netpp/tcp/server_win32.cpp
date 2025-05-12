@@ -30,7 +30,7 @@ namespace netpp {
 
   TCP_Server::TCP_Server(
     bool use_tls_ssl, const char* key_file, const char* cert_file,
-    uint32_t desired_bufsize, uint32_t bufcount, int max_threads)
+    uint32_t bufcount, uint32_t desired_bufsize, int max_threads)
     : m_stop_flag(false), m_key_file(key_file), m_cert_file(cert_file) {
     m_tls_ssl = use_tls_ssl;
 
@@ -420,6 +420,12 @@ namespace netpp {
     // the application layer protocol regardless of security used...
     // ---
     adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_tls_ssl);
+    if (!adapter) {
+      delete adapter;
+      delete[] proc_buf;
+      inproc = false;
+      return nullptr;
+    }
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
@@ -432,6 +438,9 @@ namespace netpp {
     // ---
     if (data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+      delete adapter;
+      delete[] proc_buf;
+
       data.m_bytes_total = 0;
       data.m_bytes_processed = 0;
       delete[] data.m_proc_buf;
@@ -462,6 +471,7 @@ namespace netpp {
 
     // Initiate the next read...
     if (data.m_bytes_processed < data.m_bytes_total) {
+      delete adapter;
       uint32_t flags = 0;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;
@@ -549,6 +559,7 @@ namespace netpp {
       os_layer->set_busy(EPipeOperation::E_RECV, false);
 
       if (inproc) {
+        delete adapter;
         return true;
       }
 
@@ -583,6 +594,8 @@ namespace netpp {
       data.m_bytes_total = 0;
       delete[] data.m_proc_buf;
       data.m_proc_buf = nullptr;
+
+      delete adapter;
 
       // The client code likely handled something incorrectly,
       // the adapter is not implemented yet, or the adapter

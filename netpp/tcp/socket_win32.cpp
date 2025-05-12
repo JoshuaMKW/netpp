@@ -119,21 +119,17 @@ namespace netpp {
         break;
       case EIOState::E_ASYNC:
         m_io_info.m_last_op = EPipeOperation::E_SEND;
-        io_state.m_bytes_buf = data;
         io_state.m_bytes_total = -1;
-        io_state.m_bytes_transferred = 0;
         break;
       case EIOState::E_COMPLETE:
         m_io_info.m_last_op = EPipeOperation::E_SEND;
-        io_state.m_bytes_buf = data;
-        io_state.m_bytes_total = size;
-        io_state.m_bytes_transferred = transferred;
+        delete[] io_state.m_bytes_buf;
+        io_state.m_bytes_buf = nullptr;
+        io_state.m_bytes_transferred += transferred;
         break;
       case EIOState::E_PARTIAL:
         m_io_info.m_last_op = EPipeOperation::E_SEND;
-        io_state.m_bytes_buf = data;
-        io_state.m_bytes_total = size;
-        io_state.m_bytes_transferred = transferred;
+        io_state.m_bytes_transferred += transferred;
         break;
       case EIOState::E_ERROR:
         // The socket or input is corrupted
@@ -157,7 +153,8 @@ namespace netpp {
       break;
     case EIOState::E_COMPLETE:
       m_io_info.m_last_op = EPipeOperation::E_SEND;
-      io_state.m_bytes_buf = data;
+      delete[] data;
+      io_state.m_bytes_buf = nullptr;
       io_state.m_bytes_total = size;
       io_state.m_bytes_transferred = transferred;
       break;

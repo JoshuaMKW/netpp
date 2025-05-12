@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT);
+  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT, 10000);
 
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());

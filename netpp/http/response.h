@@ -118,11 +118,15 @@ namespace netpp {
     HTTP_Response(HTTP_Response&&) = default;
     HTTP_Response& operator=(HTTP_Response&&) = default;
 
+    ~HTTP_Response() {
+      delete[] m_headers;
+    }
+
   private:
-    EHTTP_ResponseStatusCode m_status;
+    EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
     std::string m_version;
-    std::string* m_headers;
-    int m_headers_count;
+    std::string* m_headers = nullptr;
+    int m_headers_count = 0;
     std::string m_body;
   };
 

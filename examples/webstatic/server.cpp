@@ -12,9 +12,9 @@
 using namespace netpp;
 using namespace std::chrono_literals;
 
-#define SERVER_IPV4 network_ipv4()
+#define SERVER_IPV4 "0.0.0.0"
 
-#define SERVER_USE_TLS true
+#define SERVER_USE_TLS false
 
 #if SERVER_USE_TLS
 #define SERVER_CERT "./cert/cert.pem"
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT);
+  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT, 1024);
 
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());

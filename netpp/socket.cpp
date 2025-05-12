@@ -17,8 +17,8 @@ using namespace std::chrono_literals;
 
 #include <MSWSock.h>
 
-#define RIO_PENDING_MAX 5
-#define RIO_MAX_BUFFERS 1024
+// TODO - Replace these define constants with configurable parameters
+#define RIO_PENDING_MAX 10
 
 #define CLIENT_USE_WSA true
 

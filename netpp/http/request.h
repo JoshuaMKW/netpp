@@ -68,14 +68,19 @@ namespace netpp {
     HTTP_Request(HTTP_Request&&) = default;
     HTTP_Request& operator=(HTTP_Request&&) = default;
 
+    ~HTTP_Request() {
+      delete[] m_headers;
+      delete[] m_queries;
+    }
+
   private:
-    EHTTP_RequestMethod m_method;
+    EHTTP_RequestMethod m_method = EHTTP_RequestMethod::E_NONE;
     std::string m_path;
     std::string m_version;
-    std::string* m_headers;
-    int m_headers_count;
-    std::string* m_queries;
-    int m_queries_count;
+    std::string* m_headers = nullptr;
+    int m_headers_count = 0;
+    std::string* m_queries = nullptr;
+    int m_queries_count = 0;
     std::string m_body;
   };
 
