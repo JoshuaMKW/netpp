@@ -151,12 +151,12 @@ namespace netpp {
     }
   }
 
-  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, bool is_tls_secure) {
+  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, ISecurityController *security) {
     EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_RAW;
     // Check here for HTTPS
 
     if (HTTP_Request::is_http_request(data, size) || HTTP_Response::is_http_response(data, size)) {
-      protocol = is_tls_secure ? EApplicationLayerProtocol::E_HTTPS : EApplicationLayerProtocol::E_HTTP;
+      protocol = security ? EApplicationLayerProtocol::E_HTTPS : EApplicationLayerProtocol::E_HTTP;
     }
 
     return create(protocol);

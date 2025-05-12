@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "socket.h"
+#include "tls/controller.h"
 #include "server.h"
 
 #include "common.h"
@@ -43,7 +44,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  TCP_Server server(SERVER_USE_TLS, SERVER_KEY, SERVER_CERT, 1024);
+#if SERVER_USE_TLS
+  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD);
+#else
+  TLSSecurityController* security = nullptr;
+#endif
+
+  TCP_Server server(security, 1024);
 
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
@@ -102,6 +109,8 @@ int main(int argc, char** argv) {
     });
 
   while (server.is_running()) { std::this_thread::sleep_for(std::chrono::seconds(1)); }
+
+  delete security;
 
   sockets_deinitialize();
   return 0;

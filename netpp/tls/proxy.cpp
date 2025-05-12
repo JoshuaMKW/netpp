@@ -10,7 +10,8 @@
 #include <openssl/ssl.h>
 
 #include "network.h"
-#include "socket.h"
+#include "security.h"
+#include "proxy.h"
 
 using namespace std::chrono_literals;
 
@@ -22,17 +23,19 @@ using namespace std::chrono_literals;
 #define SERVER_VERIFY_CONFIG SSL_VERIFY_NONE
 #define CLIENT_VERIFY_CONFIG SSL_VERIFY_NONE
 #else
-#define SERVER_VERIFY_CONFIG SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
+#define SERVER_VERIFY_CONFIG SSL_VERIFY_PEER
 #define CLIENT_VERIFY_CONFIG SSL_VERIFY_PEER
 #endif
 
 namespace netpp {
 
-  TLS_SocketProxy::TLS_SocketProxy(ISocketPipe* pipe, const char* key_file, const char* cert_file, const char* passwd)
+  TLS_SocketProxy::TLS_SocketProxy(ISocketPipe* pipe, const ISecurityController* security)
     : m_pipe(pipe), m_handshake_initiated(false), m_handshake_state(EAuthState::E_NONE), m_in_bio(), m_out_bio() {
-    //if (aes_key) {
-    //  memmove(m_aes_key, aes_key, key_size);
-    //}
+    std::string key_file = security->key_file().string();
+    std::string cert_file = security->cert_file().string();
+    std::string ca_file = security->ca_file().string();
+    std::string hostname = security->hostname();
+    std::string passwd = security->password();
 
     if (pipe->is_server()) {
       m_tls_ctx = SSL_CTX_new(TLS_server_method());
@@ -62,18 +65,18 @@ namespace netpp {
       return;
     }
 
-    if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file, SSL_FILETYPE_PEM) <= 0) {
+    if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
       ERR_print_errors_fp(stderr);
       SSL_CTX_free(m_tls_ctx);
       m_tls_ctx = nullptr;
       return;
     }
 
-    if (passwd) {
-      SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd);
+    if (!passwd.empty()) {
+      SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd.c_str());
     }
 
-    if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
+    if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
       ERR_print_errors_fp(stderr);
       SSL_CTX_free(m_tls_ctx);
       m_tls_ctx = nullptr;
@@ -90,26 +93,30 @@ namespace netpp {
     if (pipe->is_server()) {
       SSL_CTX_set_verify(m_tls_ctx, SERVER_VERIFY_CONFIG, NULL);
 
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file, NULL) < 1) {
+      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(m_tls_ctx);
         m_tls_ctx = nullptr;
         return;
       }
 
-      if (auto* ca_file = SSL_load_client_CA_file(cert_file)) {
-        SSL_CTX_set_client_CA_list(m_tls_ctx, ca_file);
+      if (auto* ca_list = SSL_load_client_CA_file(ca_file.c_str())) {
+        SSL_CTX_set_client_CA_list(m_tls_ctx, ca_list);
       }
     }
     else {
       SSL_CTX_set_verify(m_tls_ctx, CLIENT_VERIFY_CONFIG, NULL);
 
       // Load the server's certificate as a trusted CA
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file, NULL) < 1) {
+      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(m_tls_ctx);
         m_tls_ctx = nullptr;
         return;
+      }
+
+      if (auto* ca_list = SSL_load_client_CA_file(ca_file.c_str())) {
+        SSL_CTX_set_client_CA_list(m_tls_ctx, ca_list);
       }
     }
   }

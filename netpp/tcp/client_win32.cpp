@@ -1,5 +1,6 @@
 #include "client.h"
 #include "protocol.h"
+#include "tls/proxy.h"
 
 #include <cassert>
 #include <chrono>
@@ -31,10 +32,8 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t desired_bufsize)
-    : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE) {
-    m_tls_ssl = use_tls_ssl;
-
+  TCP_Client::TCP_Client(ISecurityController *security, uint32_t desired_bufsize)
+    : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE), m_security(security) {
     m_error = EClientError::E_NONE;
     m_reason = -1;
 
@@ -76,8 +75,8 @@ namespace netpp {
     m_startup_thread = std::this_thread::get_id();
 
     ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
-    if (m_tls_ssl) {
-      m_server_socket.m_pipe = new TLS_SocketProxy(pipe, key_file, cert_file);
+    if (m_security) {
+      m_server_socket.m_pipe = new TLS_SocketProxy(pipe, m_security);
     }
     else {
       m_server_socket.m_pipe = pipe;
@@ -190,7 +189,7 @@ namespace netpp {
       state = m_server_socket.m_pipe->recv(0, nullptr, nullptr);
     }
 
-    while (m_tls_ssl && !m_handshake_done) {
+    while (m_security && !m_handshake_done) {
       std::this_thread::sleep_for(16ms);
     }
 
@@ -342,7 +341,7 @@ namespace netpp {
       // Since the TLS handshake process manages its
       // own recv calls, we wrap this for when
       // the handshake isn't happening.
-      if (!client->m_tls_ssl || client->m_handshake_done) {
+      if (!client->m_security || client->m_handshake_done) {
         EIOState state = server_pipe->recv(0, nullptr, nullptr);
         if (state == EIOState::E_ERROR) {
           server_pipe->error(ESocketErrorReason::E_REASON_RECV);
@@ -369,7 +368,7 @@ namespace netpp {
 
         pipe->set_busy(info.m_operation, false);
 
-        if (client->m_tls_ssl && !client->m_handshake_done) {
+        if (client->m_security && !client->m_handshake_done) {
           return client->handle_auth_operations(client->m_server_socket, info);
         }
 
@@ -459,7 +458,7 @@ namespace netpp {
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_tls_ssl);
+    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---

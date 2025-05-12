@@ -16,13 +16,18 @@ add_library(netpp STATIC
     client.cpp
     network.cpp
     protocol.cpp
+    security.h
     server.cpp
+    socket.h
     socket.cpp
 
     http/request.cpp
     http/response.cpp
 
-    tls/socket_layer.cpp
+    tls/proxy.h
+    tls/proxy.cpp
+    tls/controller.h
+    tls/controller.cpp
 
     tcp/socket_win32.cpp
     tcp/client_unix.cpp
@@ -30,10 +35,10 @@ add_library(netpp STATIC
     tcp/server_unix.cpp
     tcp/server_win32.cpp
 
-    UDP/client_unix.cpp
-    UDP/client_win32.cpp
-    UDP/server_unix.cpp
-    UDP/server_win32.cpp
+    udp/client_unix.cpp
+    udp/client_win32.cpp
+    udp/server_unix.cpp
+    udp/server_win32.cpp
     udp/socket_win32.cpp
 )
 

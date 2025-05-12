@@ -76,7 +76,7 @@ namespace netpp {
 
   class NETPP_API TCP_Client final : public IClient {
   public:
-    TCP_Client(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t bufsize = 4096);
+    TCP_Client(ISecurityController* security, uint32_t bufsize = 0);
     ~TCP_Client();
 
     bool is_running() const override;
@@ -158,9 +158,10 @@ namespace netpp {
     std::mutex m_mutex;
     bool m_stop_flag;
 
-    bool m_tls_ssl;
     bool m_handshake_done;
     EAuthState m_handshake_state;
-  };
+
+    ISecurityController* m_security;
+  };            
 
 }  // namespace netpp

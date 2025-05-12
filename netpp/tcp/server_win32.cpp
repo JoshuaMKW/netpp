@@ -1,4 +1,5 @@
 #include "server.h"
+#include "tls/proxy.h"
 
 #include <cassert>
 #include <execution>
@@ -28,12 +29,9 @@ namespace netpp {
     return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
-  TCP_Server::TCP_Server(
-    bool use_tls_ssl, const char* key_file, const char* cert_file,
+  TCP_Server::TCP_Server(ISecurityController* security,
     uint32_t bufcount, uint32_t desired_bufsize, int max_threads)
-    : m_stop_flag(false), m_key_file(key_file), m_cert_file(cert_file) {
-    m_tls_ssl = use_tls_ssl;
-
+    : m_stop_flag(false), m_security(security), m_server_socket(nullptr) {
     m_error = EServerError::E_NONE;
     m_reason = -1;
 
@@ -88,8 +86,14 @@ namespace netpp {
     m_startup_thread = std::this_thread::get_id();
 
     ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
-    if (m_tls_ssl) {
-      m_server_socket = new TLS_SocketProxy(pipe, key_file, cert_file);
+    if (m_security) {
+      ESecurityProtocol protocol = m_security->protocol();
+      switch (protocol) {
+      case ESecurityProtocol::E_TLS: {
+        m_server_socket = new TLS_SocketProxy(pipe, m_security);
+        break;
+      }
+      }
     }
     else {
       m_server_socket = pipe;
@@ -419,7 +423,7 @@ namespace netpp {
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_tls_ssl);
+    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_security);
     if (!adapter) {
       delete adapter;
       delete[] proc_buf;
@@ -677,14 +681,20 @@ namespace netpp {
       ISocketPipe* client_pipe = new TCP_Socket(
         m_server_socket, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
 
-      if (m_tls_ssl) {
-        client_pipe = new TLS_SocketProxy(client_pipe, m_key_file, m_cert_file);
+      if (m_security) {
+        ESecurityProtocol protocol = m_security->protocol();
+        switch (protocol) {
+        case ESecurityProtocol::E_TLS: {
+          client_pipe = new TLS_SocketProxy(client_pipe, m_security);
+          break;
+        }
+        }
       }
 
       client_pipe->open(socket);
       client_pipe->clone_callbacks_from(m_server_socket);
 
-      if (m_tls_ssl) {
+      if (m_security) {
         m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
         {
           TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
@@ -742,14 +752,20 @@ namespace netpp {
         ISocketPipe* client_pipe = new TCP_Socket(
           server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
 
-        if (server->m_tls_ssl) {
-          client_pipe = new TLS_SocketProxy(client_pipe, server->m_key_file, server->m_cert_file);
+        if (server->m_security) {
+          ESecurityProtocol protocol = server->m_security->protocol();
+          switch (protocol) {
+          case ESecurityProtocol::E_TLS: {
+            client_pipe = new TLS_SocketProxy(client_pipe, server->m_security);
+            break;
+          }
+          }
         }
 
         client_pipe->open(socket);
         client_pipe->clone_callbacks_from(server->m_server_socket);
 
-        if (server->m_tls_ssl) {
+        if (server->m_security) {
           server->m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
           {
             TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);

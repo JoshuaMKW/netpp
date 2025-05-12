@@ -2,6 +2,7 @@
 
 #include "client.h"
 #include "socket.h"
+#include "tls/controller.h"
 
 #include "common.h"
 #include "inputhandler.h"
@@ -72,7 +73,13 @@ int main(int argc, char** argv) {
   printf("Enter your name: ");
   std::getline(std::cin, client_name);
 
-  TCP_Client client(true, SERVER_KEY, SERVER_CERT, 65536);
+#if SERVER_USE_TLS
+  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", "");
+#else
+  TLSSecurityController* security = nullptr;
+#endif
+
+  TCP_Client client(security);
   InputHandler msg_handler(client_name);
 
   bool sent_message = false;
@@ -210,6 +217,8 @@ int main(int argc, char** argv) {
 #endif
     }
   }
+
+  delete security;
 
   msg_handler.stop();
 

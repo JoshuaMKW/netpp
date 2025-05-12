@@ -11,6 +11,7 @@
 #include "network.h"
 #include "http/request.h"
 #include "http/response.h"
+#include "security.h"
 #include "socket.h"
 
 namespace netpp {
@@ -71,7 +72,7 @@ namespace netpp {
   class NETPP_API TCP_Server final : public IServer {
   public:
     TCP_Server() = delete;
-    TCP_Server(bool use_tls_ssl, const char* key_file, const char* cert_file, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
+    TCP_Server(ISecurityController *security, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
     ~TCP_Server();
 
     bool is_running() const override;
@@ -169,10 +170,7 @@ namespace netpp {
     std::recursive_mutex m_mutex;
     bool m_stop_flag;
 
-    bool m_tls_ssl;
-
-    const char* m_key_file;
-    const char* m_cert_file;
+    ISecurityController* m_security;
   };
 
 } // namespace netpp

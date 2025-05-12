@@ -4,6 +4,7 @@
 
 #include "netpp.h"
 #include "network.h"
+#include "security.h"
 
 struct sockaddr;
 
@@ -194,7 +195,7 @@ namespace netpp {
   class NETPP_API ApplicationAdapterFactory {
   public:
     static IApplicationLayerAdapter* create(EApplicationLayerProtocol protocol);
-    static IApplicationLayerAdapter* detect(const char* data, uint32_t size, bool is_tls_secure);
+    static IApplicationLayerAdapter* detect(const char* data, uint32_t size, ISecurityController *security);
   };
 
 #pragma endregion
