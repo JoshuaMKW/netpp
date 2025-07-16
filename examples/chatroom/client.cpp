@@ -2,6 +2,7 @@
 
 #include "client.h"
 #include "socket.h"
+#include "http/router.h"
 #include "tls/controller.h"
 
 #include "common.h"

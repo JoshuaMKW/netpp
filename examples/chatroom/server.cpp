@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "socket.h"
+#include "http/router.h"
 #include "tls/controller.h"
 #include "server.h"
 
@@ -50,11 +51,36 @@ int main(int argc, char** argv) {
   TLSSecurityController* security = nullptr;
 #endif
 
+  HTTP_Router router;
+
+  router.on_get("/history", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream history_file("./_chat_history.txt");
+    if (history_file.is_open()) {
+      std::string history_content((std::istreambuf_iterator<char>(history_file)), std::istreambuf_iterator<char>());
+
+      HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
+      response->set_version("1.1");
+      response->add_header("Content-Type: text/plain; charset=UTF-8");
+      response->add_header("Connection: keep-alive");
+      response->set_body(history_content);
+      return response;
+    }
+
+    return nullptr;
+    });
+
+  router.on_unhandled([](const HTTP_Request* request) -> HTTP_Response* {
+    HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_NOT_FOUND);
+    response->set_version("1.1");
+    return response;
+    });
+
   TCP_Server server(security, 1024);
 
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  } else {
+  }
+  else {
     fprintf(stderr, "Failed to start the server\n");
     return 1;
   }
