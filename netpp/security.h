@@ -8,7 +8,7 @@ namespace netpp {
   enum class ESecurityProtocol {
     E_NONE = -1,
     E_TLS,
-    E_SSL,
+    E_DTLS,
   };
 
   class ISecurityController {

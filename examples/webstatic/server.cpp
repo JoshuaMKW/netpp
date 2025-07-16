@@ -15,7 +15,7 @@ using namespace std::chrono_literals;
 
 #define SERVER_IPV4 "0.0.0.0"
 
-#define SERVER_USE_TLS true
+#define SERVER_USE_TLS false
 
 #if SERVER_USE_TLS
 #define SERVER_CERT "./cert/cert.pem"
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
   }
 
   server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
-    printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
+    //printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
 
     if (request->method() != EHTTP_RequestMethod::E_REQUEST_GET) {
       return method_not_allowed_response();

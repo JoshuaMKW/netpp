@@ -5,13 +5,7 @@
 #include <execution>
 #include <thread>
 
-#ifdef _WIN32
-
 #define DEFAULT_THREAD_MAX 4
-#define RIO_PENDING_MAX 5
-#define RIO_MAX_BUFFERS 1024
-
-#define SKIP_BUF_INIT_FLAG 0x80000000
 
 #ifndef WANTS_EXPLICIT_AUTH_SYNC
 #define WANTS_EXPLICIT_AUTH_SYNC false
@@ -29,9 +23,13 @@ namespace netpp {
     return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
-  TCP_Server::TCP_Server(ISecurityController* security,
+  UDP_Server::UDP_Server(ISecurityController* security,
     uint32_t bufcount, uint32_t desired_bufsize, int max_threads)
     : m_stop_flag(false), m_security(security), m_server_socket(nullptr) {
+    if (security) {
+      assert(security->protocol() == ESecurityProtocol::E_DTLS && "Security controller must be TLS.");
+    }
+
     m_error = EServerError::E_NONE;
     m_reason = -1;
 
@@ -85,7 +83,7 @@ namespace netpp {
 
     m_startup_thread = std::this_thread::get_id();
 
-    ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+    ISocketPipe* pipe = new UDP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
     if (m_security) {
       ESecurityProtocol protocol = m_security->protocol();
       switch (protocol) {
@@ -100,7 +98,7 @@ namespace netpp {
     }
   }
 
-  TCP_Server::~TCP_Server() {
+  UDP_Server::~UDP_Server() {
     assert(is_startup_thread_cur() && "Server must be destroyed on the same thread it was created on.");
     if (is_running()) {
       stop();
@@ -129,11 +127,11 @@ namespace netpp {
 #endif
   }
 
-  bool TCP_Server::is_running() const {
-    return m_iocp_thread.joinable() && !m_stop_flag;
+  bool UDP_Server::is_running() const {
+    return m_process_thread.joinable() && !m_stop_flag;
   }
 
-  bool TCP_Server::start(const char* hostname, const char* port) {
+  bool UDP_Server::start(const char* hostname, const char* port) {
     if (is_running()) {
       m_error = EServerError::E_ERROR_SOCKET;
       m_reason = (int)ESocketErrorReason::E_REASON_STARTUP;
@@ -143,7 +141,7 @@ namespace netpp {
     return initialize(hostname, port);
   }
 
-  void TCP_Server::stop() {
+  void UDP_Server::stop() {
     assert(is_startup_thread_cur() && "Server must be stopped on the same thread it was created on.");
     {
       std::scoped_lock<std::recursive_mutex> lock(m_mutex);
@@ -152,7 +150,7 @@ namespace netpp {
     deinitialize();
   }
 
-  bool TCP_Server::send_all(const HTTP_Request* request) {
+  bool UDP_Server::send_all(const HTTP_Request* request) {
     bool result = true;
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
@@ -165,7 +163,7 @@ namespace netpp {
     return result;
   }
 
-  bool TCP_Server::send_all(const HTTP_Response* response) {
+  bool UDP_Server::send_all(const HTTP_Response* response) {
     bool result = true;
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
@@ -178,7 +176,7 @@ namespace netpp {
     return result;
   }
 
-  bool TCP_Server::send_all(const RawPacket* packet) {
+  bool UDP_Server::send_all(const RawPacket* packet) {
     bool result = true;
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
     std::for_each(std::execution::par_unseq, m_client_sockets.begin(), m_client_sockets.end(), [&](auto& kv) {
@@ -191,11 +189,11 @@ namespace netpp {
     return result;
   }
 
-  uint64_t TCP_Server::socket(const char* hostname, const char* port) {
+  uint64_t UDP_Server::socket(const char* hostname, const char* port) {
     return 0;
   }
 
-  bool TCP_Server::send(uint64_t socket, const HTTP_Request* request) {
+  bool UDP_Server::send(uint64_t socket, const HTTP_Request* request) {
     ISocketPipe* pipe = get_socket_pipe(socket);
     if (!pipe) {
       return false;
@@ -214,7 +212,7 @@ namespace netpp {
     return m_error != EServerError::E_NONE;
   }
 
-  bool TCP_Server::send(uint64_t socket, const HTTP_Response* response) {
+  bool UDP_Server::send(uint64_t socket, const HTTP_Response* response) {
     ISocketPipe* pipe = get_socket_pipe(socket);
     if (!pipe) {
       return false;
@@ -233,7 +231,7 @@ namespace netpp {
     return m_error != EServerError::E_NONE;
   }
 
-  bool TCP_Server::send(uint64_t socket, const RawPacket* packet) {
+  bool UDP_Server::send(uint64_t socket, const RawPacket* packet) {
     ISocketPipe* pipe = get_socket_pipe(socket);
     if (!pipe) {
       return false;
@@ -252,7 +250,7 @@ namespace netpp {
     return m_error != EServerError::E_NONE;
   }
 
-  void TCP_Server::emit_error(ISocketPipe* pipe, EServerError error, int reason) {
+  void UDP_Server::emit_error(ISocketPipe* pipe, EServerError error, int reason) {
     m_error = error;
     m_reason = reason;
 
@@ -271,11 +269,11 @@ namespace netpp {
     }
   }
 
-  bool TCP_Server::is_startup_thread_cur() const {
+  bool UDP_Server::is_startup_thread_cur() const {
     return m_startup_thread == std::this_thread::get_id();
   }
 
-  bool TCP_Server::initialize(const char* hostname, const char* port) {
+  bool UDP_Server::initialize(const char* hostname, const char* port) {
     if (is_running()) {
       emit_error(nullptr, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_STARTUP);
       return false;
@@ -302,30 +300,25 @@ namespace netpp {
     }
 
     m_accept_thread = std::thread(server_accept_thread, this);
+    m_update_thread = std::thread(server_update_thread, this);
     m_process_thread = std::thread(server_process_thread, this);
-    m_iocp_thread = std::thread(server_iocp_thread_win32, this);
-    m_cleanup_thread = std::thread(server_cleanup_thread, this);
 
     return true;
   }
 
-  void TCP_Server::deinitialize() {
+  void UDP_Server::deinitialize() {
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
-    if (m_process_thread.joinable()) {
-      m_process_thread.join();
-    }
-
-    if (m_cleanup_thread.joinable()) {
-      m_cleanup_thread.join();
+    if (m_update_thread.joinable()) {
+      m_update_thread.join();
     }
 
     if (m_accept_thread.joinable()) {
       m_accept_thread.join();
     }
 
-    if (m_iocp_thread.joinable()) {
-      m_iocp_thread.join();
+    if (m_process_thread.joinable()) {
+      m_process_thread.join();
     }
 
     m_server_socket->close();
@@ -342,18 +335,18 @@ namespace netpp {
     SocketOSSupportLayerFactory::deinitialize();
   }
 
-  ISocketPipe* TCP_Server::get_socket_pipe(uint64_t socket) {
+  ISocketPipe* UDP_Server::get_socket_pipe(uint64_t socket) {
     if (m_client_sockets.find(socket) == m_client_sockets.end()) {
       return nullptr;
     }
     return m_client_sockets[socket].m_pipe;
   }
 
-  void TCP_Server::close_socket(ISocketPipe* pipe) {
+  void UDP_Server::close_socket(ISocketPipe* pipe) {
     m_purgatory_sockets.push(pipe->socket());
   }
 
-  IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketProcData& data, const ISocketIOResult::OperationData& info, bool& inproc) {
+  IApplicationLayerAdapter* UDP_Server::handle_inproc_recv(SocketProcData& data, const ISocketIOResult::OperationData& info, bool& inproc) {
     IApplicationLayerAdapter* adapter = nullptr;
     ISocketPipe* pipe = data.m_pipe;
 
@@ -488,7 +481,7 @@ namespace netpp {
     return adapter;
   }
 
-  bool TCP_Server::handle_auth_operations(SocketProcData& data, const ISocketIOResult::OperationData& info) {
+  bool UDP_Server::handle_auth_operations(SocketProcData& data, const ISocketIOResult::OperationData& info) {
     ISocketPipe* pipe = data.m_pipe;
 
     switch (info.m_operation) {
@@ -544,7 +537,7 @@ namespace netpp {
     return true;
   }
 
-  bool TCP_Server::handle_client_operations(SocketProcData& data, const ISocketIOResult::OperationData& info) {
+  bool UDP_Server::handle_client_operations(SocketProcData& data, const ISocketIOResult::OperationData& info) {
     ISocketPipe* pipe = data.m_pipe;
     const SocketIOInfo& sock_data = pipe->get_io_info();
 
@@ -586,7 +579,7 @@ namespace netpp {
       uint32_t flags = 0;
       bool success = adapter->on_receive(
         pipe,
-        data.m_proc_buf,
+        data.m_proc_buf,-
         data.m_bytes_processed,
         flags
       );
@@ -673,12 +666,12 @@ namespace netpp {
     return false;
   }
 
-  void TCP_Server::integrate_pending_sockets() {
+  void UDP_Server::integrate_pending_sockets() {
     while (!m_awaiting_sockets.empty()) {
       uint64_t socket = m_awaiting_sockets.front();
       m_awaiting_sockets.pop();
 
-      ISocketPipe* client_pipe = new TCP_Socket(
+      ISocketPipe* client_pipe = new UDP_Socket(
         m_server_socket, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
 
       if (m_security) {
@@ -708,7 +701,7 @@ namespace netpp {
     }
   }
 
-  void TCP_Server::proc_auth_on_sockets() {
+  void UDP_Server::proc_auth_on_sockets() {
     for (auto& socket : m_pending_auth_sockets) {
       ISocketPipe* pipe = socket.second.m_pipe;
       if (pipe == nullptr) {
@@ -717,7 +710,7 @@ namespace netpp {
     }
   }
 
-  void TCP_Server::receive_on_sockets() {
+  void UDP_Server::receive_on_sockets() {
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
     for (auto& socket : m_client_sockets) {
@@ -739,8 +732,29 @@ namespace netpp {
     }
   }
 
-  uint64_t TCP_Server::server_accept_thread(void* param) {
-    TCP_Server* server = (TCP_Server*)param;
+  void UDP_Server::cleanup_sockets() {
+    std::scoped_lock<std::recursive_mutex> lock(m_mutex);
+
+    while (!m_purgatory_sockets.empty()) {
+      uint64_t socket = m_purgatory_sockets.front();
+      m_purgatory_sockets.pop();
+
+      if (m_client_sockets.find(socket) == m_client_sockets.end()) {
+        continue;
+      }
+
+      SocketProcData& sock_data = m_client_sockets[socket];
+      if (sock_data.m_pipe) {
+        delete sock_data.m_pipe;
+
+        // Pipe cleaned itself up earlier by the call to close
+        m_client_sockets.erase(socket);
+      }
+    }
+  }
+
+  uint64_t UDP_Server::server_accept_thread(void* param) {
+    UDP_Server* server = (UDP_Server*)param;
 
     SOCKADDR_STORAGE from;
     ZeroMemory(&from, sizeof(from));
@@ -749,7 +763,7 @@ namespace netpp {
       bool success = server->m_server_socket->accept(nullptr, [server](uint64_t socket) {
         std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
-        ISocketPipe* client_pipe = new TCP_Socket(
+        ISocketPipe* client_pipe = new UDP_Socket(
           server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
 
         if (server->m_security) {
@@ -787,14 +801,15 @@ namespace netpp {
     return 0;
   }
 
-  uint64_t TCP_Server::server_process_thread(void* param) {
-    TCP_Server* server = (TCP_Server*)param;
+  uint64_t UDP_Server::server_update_thread(void* param) {
+    UDP_Server* server = (UDP_Server*)param;
     ISocketPipe* server_pipe = server->m_server_socket;
 
     while (server->is_running()) {
       server->integrate_pending_sockets();
 
       if (!server_pipe->notify_all()) {
+        server->emit_error(server_pipe, EServerError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SOCKET);
         return 0;
       }
 
@@ -805,13 +820,15 @@ namespace netpp {
     return 0;
   }
 
-  uint64_t TCP_Server::server_iocp_thread_win32(void* param) {
-    TCP_Server* server = (TCP_Server*)param;
+  uint64_t UDP_Server::server_process_thread(void* param) {
+    UDP_Server* server = (UDP_Server*)param;
     ISocketPipe* server_pipe = server->m_server_socket;
 
     // TODO: Establish defined structure (should multiple sockets be handled per iocp thread?)
     //       If so, what does that look like?
     while (server->is_running()) {
+      server->cleanup_sockets();
+
       ISocketIOResult* sock_results = server->m_server_socket->wait_results();
       if (!sock_results || !sock_results->is_valid()) {
         server->m_server_socket->error(ESocketErrorReason::E_REASON_CORRUPT);
@@ -850,39 +867,4 @@ namespace netpp {
     return 0;
   }
 
-  uint64_t TCP_Server::server_cleanup_thread(void* param) {
-    TCP_Server* server = (TCP_Server*)param;
-
-    while (server->is_running()) {
-      if (server->m_purgatory_sockets.size() > 0) {
-        std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
-
-        uint64_t socket = server->m_purgatory_sockets.front();
-        server->m_purgatory_sockets.pop();
-
-        if (server->m_client_sockets.find(socket) == server->m_client_sockets.end()) {
-          continue;
-        }
-
-        SocketProcData& sock_data = server->m_client_sockets[socket];
-        if (sock_data.m_pipe) {
-          delete sock_data.m_pipe;
-
-          // Pipe cleaned itself up earlier by the call to close
-          server->m_client_sockets.erase(socket);
-        }
-
-        if (server->m_socket_threads.find(socket) != server->m_socket_threads.end()) {
-          server->m_socket_threads[socket].join();
-          server->m_socket_threads.erase(socket);
-        }
-      }
-    }
-
-    return 0;
-  }
-
 }  // namespace netpp
-
-#endif
-

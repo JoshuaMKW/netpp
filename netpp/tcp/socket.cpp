@@ -10,8 +10,6 @@
 using namespace std::chrono;
 using namespace std::chrono_literals;
 
-#ifdef _WIN32
-
 namespace netpp {
 
   TCP_Socket::TCP_Socket(ISocketPipe* root_socket,
@@ -59,12 +57,6 @@ namespace netpp {
 
   EIOState TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     SocketIOState& io_state = m_io_info.m_recv_state;
-
-    //if (io_state.m_state == EIOState::E_ASYNC) {
-    //  // The socket is busy, call again
-    //  // after the transaction confirms
-    //  return EIOState::E_BUSY;
-    //}
 
     int32_t ret = m_socket_layer->recv(offset, flags, transferred_out);
     EIOState state = m_socket_layer->state(EPipeOperation::E_RECV);
@@ -203,5 +195,3 @@ namespace netpp {
   }
 
 }  // namespace netpp
-
-#endif

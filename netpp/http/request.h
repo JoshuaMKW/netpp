@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "netpp.h"
 
@@ -42,9 +43,11 @@ namespace netpp {
 
     EHTTP_RequestMethod method() const { return m_method; }
     std::string path() const { return m_path; }
+
     std::string version() const { return m_version; }
-    const std::string* headers() const { return m_headers; }
-    int headers_count() const { return m_headers_count; }
+
+    const std::vector<std::string>& headers() const { return m_headers; }
+    const std::vector<std::string>& queries() const { return m_queries; }
     std::string body() const { return m_body; }
 
     void set_path(const std::string& path) { m_path = path; }
@@ -68,19 +71,14 @@ namespace netpp {
     HTTP_Request(HTTP_Request&&) = default;
     HTTP_Request& operator=(HTTP_Request&&) = default;
 
-    ~HTTP_Request() {
-      delete[] m_headers;
-      delete[] m_queries;
-    }
+    ~HTTP_Request() = default;
 
   private:
     EHTTP_RequestMethod m_method = EHTTP_RequestMethod::E_NONE;
     std::string m_path;
     std::string m_version;
-    std::string* m_headers = nullptr;
-    int m_headers_count = 0;
-    std::string* m_queries = nullptr;
-    int m_queries_count = 0;
+    std::vector<std::string> m_headers;
+    std::vector<std::string> m_queries;
     std::string m_body;
   };
 

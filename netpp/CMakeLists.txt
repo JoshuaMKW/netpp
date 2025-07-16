@@ -19,7 +19,9 @@ add_library(netpp STATIC
     security.h
     server.cpp
     socket.h
-    socket.cpp
+
+    platform/socket.h
+    platform/socket.cpp
 
     http/request.cpp
     http/response.cpp
@@ -29,17 +31,13 @@ add_library(netpp STATIC
     tls/controller.h
     tls/controller.cpp
 
-    tcp/socket_win32.cpp
-    tcp/client_unix.cpp
-    tcp/client_win32.cpp
-    tcp/server_unix.cpp
-    tcp/server_win32.cpp
+    tcp/socket.cpp
+    tcp/client.cpp
+    tcp/server.cpp
 
-    udp/client_unix.cpp
-    udp/client_win32.cpp
-    udp/server_unix.cpp
-    udp/server_win32.cpp
-    udp/socket_win32.cpp
+    udp/socket.cpp
+    udp/client.cpp
+    udp/server.cpp
 )
 
 # Include directories

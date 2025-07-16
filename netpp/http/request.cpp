@@ -1,5 +1,7 @@
-#include "request.h"
+#include <algorithm>
 #include <string.h>
+
+#include "request.h"
 
 namespace netpp {
 
@@ -103,8 +105,8 @@ namespace netpp {
     request->m_method = type;
     request->m_path = "";
     request->m_version = "";
-    request->m_headers = new std::string[32]();
-    request->m_headers_count = 0;
+    request->m_headers.reserve(32);
+    request->m_queries.reserve(32);
     request->m_body = "";
     return request;
   }
@@ -312,7 +314,7 @@ namespace netpp {
   }
 
   void HTTP_Request::add_header(const std::string& header) {
-    m_headers[m_headers_count++] = header;
+    m_headers.push_back(header);
   }
 
   void HTTP_Request::set_body(const std::string& body) {
@@ -320,25 +322,20 @@ namespace netpp {
   }
 
   void HTTP_Request::add_query(const std::string& query) {
-    m_queries[m_queries_count++] = query;
+    m_queries.push_back(query);
   }
 
   bool HTTP_Request::has_header(const std::string& header) const {
-    for (int i = 0; i < m_headers_count; ++i) {
-      if (m_headers[i] == header) {
-        return true;
-      }
-    }
-    return false;
+    return std::any_of(m_headers.begin(), m_headers.end(),
+      [&header](const std::string& h) { return h == header; });
   }
 
   std::string HTTP_Request::build(const HTTP_Request& request) {
     std::string request_str = http_request_str(request.method());
     request_str += " " + request.path() + " HTTP/" + request.version() + "\r\n";
 
-    const std::string* headers = request.headers();
-    for (int i = 0; i < request.headers_count(); i++) {
-      request_str += headers[i] + "\r\n";
+    for (const std::string &hdr : request.headers()) {
+      request_str += hdr + "\r\n";
     }
 
     if (request.has_body()) {
@@ -365,9 +362,8 @@ namespace netpp {
     http_size += request.path().length();
     http_size += request.version().length() + 5;
 
-    const std::string* headers = request.headers();
-    for (int i = 0; i < request.headers_count(); i++) {
-      http_size += headers[i].length() + 2;  // 1 carriage return, 1 newline
+    for (const std::string& hdr : request.headers()) {
+      http_size += hdr.length() + 2;  // 1 carriage return, 1 newline
     }
 
     if (request.has_body()) {
@@ -417,9 +413,9 @@ namespace netpp {
 
     //--------------------------------------------------------------
     // Headers
-    for (int i = 0; i < request.headers_count(); i++) {
-      size_t header_len = headers[i].length();
-      memcpy(buf_out + offset, headers[i].c_str(), header_len);
+    for (const std::string& hdr : request.headers()) {
+      size_t header_len = hdr.length();
+      memcpy(buf_out + offset, hdr.c_str(), header_len);
       offset += header_len;
       *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
       offset += 2;

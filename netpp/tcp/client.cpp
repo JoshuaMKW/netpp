@@ -8,11 +8,7 @@
 
 using namespace std::chrono_literals;
 
-#ifdef _WIN32
-
 #define DEFAULT_THREAD_MAX 4
-#define RIO_PENDING_MAX 5
-#define RIO_MAX_BUFFERS 1024
 
 #ifndef WANTS_EXPLICIT_AUTH_SYNC
 #define WANTS_EXPLICIT_AUTH_SYNC false
@@ -34,6 +30,10 @@ namespace netpp {
 
   TCP_Client::TCP_Client(ISecurityController *security, uint32_t desired_bufsize)
     : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE), m_security(security) {
+    if (security) {
+      assert(security->protocol() == ESecurityProtocol::E_TLS && "Security controller must be TLS.");
+    }
+
     m_error = EClientError::E_NONE;
     m_reason = -1;
 
@@ -381,7 +381,6 @@ namespace netpp {
         });
 
       delete sock_results;
-#endif
     }  // End of while loop
 
     return 0;
