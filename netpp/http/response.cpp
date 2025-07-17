@@ -101,8 +101,7 @@ namespace netpp {
   HTTP_Response* HTTP_Response::create(EHTTP_ResponseStatusCode status) {
     HTTP_Response* response = new HTTP_Response();
     response->m_status = status;
-    response->m_headers = new std::string[32]();
-    response->m_headers_count = 0;
+    response->m_headers.reserve(32);
     response->m_body = std::string();
     return response;
   }
@@ -205,8 +204,8 @@ namespace netpp {
       "HTTP/" + response.version() + " " + std::to_string((int)response.status_code()) + " " + http_response_status(response.status_code()) + "\r\n";
 
     // Headers
-    const std::string* headers = response.headers();
-    for (int i = 0; i < response.headers_count(); i++) {
+    const std::vector<std::string>& headers = response.headers();
+    for (int i = 0; i < headers.size(); i++) {
       response_str += headers[i] + "\r\n";
     }
 
@@ -236,8 +235,8 @@ namespace netpp {
     size_t response_size = 0;
     response_size += 12 + response.version().length() + strlen(status);  // "HTTP/... ZZZ sss...\r\n"
 
-    const std::string* headers = response.headers();
-    for (int i = 0; i < response.headers_count(); i++) {
+    const std::vector<std::string>& headers = response.headers();
+    for (int i = 0; i < headers.size(); i++) {
       response_size += headers[i].length() + 2;  // header + "\r\n"
     }
 
@@ -288,7 +287,7 @@ namespace netpp {
     //-------------------------------------------------------------
     // Headers
     //-------------------------------------------------------------
-    for (int i = 0; i < response.headers_count(); i++) {
+    for (int i = 0; i < headers.size(); i++) {
       size_t header_len = headers[i].length();
       memcpy_s(response_buf + offset, response_size, headers[i].c_str(), header_len);
       offset += header_len;
@@ -403,7 +402,7 @@ namespace netpp {
   }
 
   void HTTP_Response::add_header(const std::string& header) {
-    m_headers[m_headers_count++] = header;
+    m_headers.push_back(header);
   }
 
   void HTTP_Response::set_body(const std::string& body) {
@@ -411,7 +410,7 @@ namespace netpp {
   }
 
   bool HTTP_Response::has_header(const std::string& header) const {
-    for (int i = 0; i < m_headers_count; ++i) {
+    for (int i = 0; i < m_headers.size(); ++i) {
       if (m_headers[i] == header) {
         return true;
       }

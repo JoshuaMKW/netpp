@@ -75,9 +75,10 @@ int main(int argc, char** argv) {
   std::getline(std::cin, client_name);
 
 #if SERVER_USE_TLS
-  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", "");
+  TLSSecurityFactory* security
+    = new TLSSecurityFactory(false, SERVER_KEY, SERVER_CERT, "", "localhost", "", ETLSVerifyFlags::VERIFY_PEER);
 #else
-  TLSSecurityController* security = nullptr;
+  TLSSecurityFactory* security = nullptr;
 #endif
 
   TCP_Client client(security);

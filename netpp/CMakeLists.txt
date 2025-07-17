@@ -26,8 +26,8 @@ add_library(netpp STATIC
     http/request.cpp
     http/response.cpp
 
-    tls/proxy.h
-    tls/proxy.cpp
+    
+    
     tls/controller.h
     tls/controller.cpp
 

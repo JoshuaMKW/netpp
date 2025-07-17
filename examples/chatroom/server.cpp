@@ -46,10 +46,21 @@ int main(int argc, char** argv) {
   }
 
 #if SERVER_USE_TLS
-  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD);
+  TLSSecurityFactory* security = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD,
+    ETLSVerifyFlags::VERIFY_PEER);
 #else
-  TLSSecurityController* security = nullptr;
+  TLSSecurityFactory* security = nullptr;
 #endif
+
+  TCP_Server server(security, 1024);
+
+  if (server.start(SERVER_IPV4, SERVER_PORT)) {
+    printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
+  }
+  else {
+    fprintf(stderr, "Failed to start the server\n");
+    return 1;
+  }
 
   HTTP_Router router;
 
@@ -66,53 +77,21 @@ int main(int argc, char** argv) {
       return response;
     }
 
-    return nullptr;
+    HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_NOT_FOUND);
+    response->set_version("1.1");
+    return response;
     });
 
   router.on_unhandled([](const HTTP_Request* request) -> HTTP_Response* {
-    HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_NOT_FOUND);
+    HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_METHOD_NOT_ALLOWED);
     response->set_version("1.1");
+    response->add_header("Content-Type: text/plain; charset=UTF-8");
+    response->add_header("Connection: keep-alive");
     return response;
     });
 
-  TCP_Server server(security, 1024);
-
-  if (server.start(SERVER_IPV4, SERVER_PORT)) {
-    printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  }
-  else {
-    fprintf(stderr, "Failed to start the server\n");
-    return 1;
-  }
-
-  server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
-    printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
-
-    if (request->method() != EHTTP_RequestMethod::E_REQUEST_GET) {
-      HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_METHOD_NOT_ALLOWED);
-      response->set_version("1.1");
-      response->add_header("Content-Type: text/plain; charset=UTF-8");
-      response->add_header("Connection: keep-alive");
-      return response;
-    }
-
-    if (request->path() == "/history") {
-      std::ifstream history_file("./_chat_history.txt");
-      if (history_file.is_open()) {
-        std::string history_content((std::istreambuf_iterator<char>(history_file)), std::istreambuf_iterator<char>());
-
-        HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
-        response->set_version("1.1");
-        response->add_header("Content-Type: text/plain; charset=UTF-8");
-        response->add_header("Connection: keep-alive");
-        response->set_body(history_content);
-        return response;
-      }
-    }
-
-    HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_NOT_FOUND);
-    response->set_version("1.1");
-    return response;
+  server.on_http_request([&router](const ISocketPipe* source, const HTTP_Request* request) {
+    return router.signal_method(request);
     });
 
 

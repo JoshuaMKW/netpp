@@ -1,6 +1,5 @@
 #include "client.h"
 #include "protocol.h"
-#include "tls/proxy.h"
 
 #include <cassert>
 #include <chrono>
@@ -28,10 +27,12 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(ISecurityController *security, uint32_t desired_bufsize)
+  TCP_Client::TCP_Client(ISecurityFactory *security, uint32_t desired_bufsize)
     : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE), m_security(security) {
     if (security) {
-      assert(security->protocol() == ESecurityProtocol::E_TLS && "Security controller must be TLS.");
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      assert((transports & ETransportProtocolFlags::E_TCP) != ETransportProtocolFlags::E_NONE
+        && "Security controller must be TLS.");
     }
 
     m_error = EClientError::E_NONE;
@@ -74,13 +75,12 @@ namespace netpp {
 
     m_startup_thread = std::this_thread::get_id();
 
-    ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_CLIENT);
+    ISecurityController* controller = nullptr;
     if (m_security) {
-      m_server_socket.m_pipe = new TLS_SocketProxy(pipe, m_security);
+      controller = m_security->create_controller();
     }
-    else {
-      m_server_socket.m_pipe = pipe;
-    }
+
+    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, controller, ESocketHint::E_CLIENT);
 
     m_server_socket.m_proc_buf = nullptr;
     m_server_socket.m_bytes_total = 0;
@@ -423,9 +423,9 @@ namespace netpp {
     // processed, we are able to stitch together fragmented
     // data packets incoming from the socket...
     // ---
+    char* post_out;
     int32_t true_size = pipe->proc_post_recv(
-      proc_buf + data.m_bytes_processed,
-      info.m_bytes_transferred,
+      &post_out,
       recv_buf,
       info.m_bytes_transferred
     );
@@ -451,6 +451,7 @@ namespace netpp {
 
     // Update the processed marker so the next pass is correctly offset...
     // ---
+    memcpy_s(proc_buf + data.m_bytes_processed, true_size, post_out, true_size);
     data.m_bytes_processed += true_size;
 
     // Then we attempt to identify what kind of data is coming in from

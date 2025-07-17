@@ -15,12 +15,13 @@ using namespace std::chrono_literals;
 
 #define SERVER_IPV4 "0.0.0.0"
 
-#define SERVER_USE_TLS false
+#define SERVER_USE_TLS true
 
 #if SERVER_USE_TLS
-#define SERVER_CERT "./cert/cert.pem"
-#define SERVER_KEY "./cert/key.pem"
-#define SERVER_CERT_PASSWD "password"
+#define SERVER_CERT "./cert/localhost.crt"
+#define SERVER_KEY "./cert/localhost.key"
+#define SERVER_CACERT "./cert/rootCA.pem"
+#define SERVER_CERT_PASSWD ""
 
 #define SERVER_PORT "443"
 #else
@@ -61,16 +62,19 @@ int main(int argc, char** argv) {
   }
 
 #if SERVER_USE_TLS
-  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD);
+  TLSSecurityFactory* security
+    = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, SERVER_CACERT, "localhost", SERVER_CERT_PASSWD,
+      ETLSVerifyFlags::VERIFY_PEER | ETLSVerifyFlags::VERIFY_FAIL_IF_NO_PEER_CERT);
 #else
-  TLSSecurityController* security = nullptr;
+  TLSSecurityFactory* security = nullptr;
 #endif
 
   TCP_Server server(security, 1024);
 
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  } else {
+  }
+  else {
     fprintf(stderr, "Failed to start the server\n");
     return 1;
   }
@@ -93,7 +97,7 @@ int main(int argc, char** argv) {
 
       return get_response("text/html", html_content);
     }
-    
+
     if (request->path() == "/index.css") {
       std::ifstream css_file("./webdata/index.css");
       if (!css_file.is_open()) {
@@ -104,7 +108,7 @@ int main(int argc, char** argv) {
 
       return get_response("text/css", css_content);
     }
-    
+
     if (request->path() == "/favicon.ico") {
       std::ifstream favicon_file("./webdata/favicon.ico");
       if (!favicon_file.is_open()) {

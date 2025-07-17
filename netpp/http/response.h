@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "netpp.h"
 
@@ -96,8 +97,7 @@ namespace netpp {
 
     EHTTP_ResponseStatusCode status_code() const { return m_status; }
     std::string version() const { return m_version; }
-    const std::string* headers() const { return m_headers; }
-    int headers_count() const { return m_headers_count; }
+    const std::vector<std::string>& headers() const { return m_headers; }
     std::string body() const { return m_body; }
 
     void set_version(const std::string& version) { m_version = version; }
@@ -118,15 +118,12 @@ namespace netpp {
     HTTP_Response(HTTP_Response&&) = default;
     HTTP_Response& operator=(HTTP_Response&&) = default;
 
-    ~HTTP_Response() {
-      delete[] m_headers;
-    }
+    ~HTTP_Response() = default;
 
   private:
     EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
     std::string m_version;
-    std::string* m_headers = nullptr;
-    int m_headers_count = 0;
+    std::vector<std::string> m_headers;
     std::string m_body;
   };
 

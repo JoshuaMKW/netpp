@@ -1,5 +1,4 @@
 #include "server.h"
-#include "tls/proxy.h"
 
 #include <cassert>
 #include <execution>
@@ -23,11 +22,13 @@ namespace netpp {
     return RoundDown(Value, Multiple) + (((Value % Multiple) > 0) ? Multiple : 0);
   }
 
-  TCP_Server::TCP_Server(ISecurityController* security,
+  TCP_Server::TCP_Server(ISecurityFactory* security,
     uint32_t bufcount, uint32_t desired_bufsize, int max_threads)
     : m_stop_flag(false), m_security(security), m_server_socket(nullptr) {
     if (security) {
-      assert(security->protocol() == ESecurityProtocol::E_TLS && "Security controller must be TLS.");
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      assert((transports & ETransportProtocolFlags::E_TCP) != ETransportProtocolFlags::E_NONE
+        && "Security controller must be TLS.");
     }
 
     m_error = EServerError::E_NONE;
@@ -83,19 +84,11 @@ namespace netpp {
 
     m_startup_thread = std::this_thread::get_id();
 
-    ISocketPipe* pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
+    ISecurityController* controller = nullptr;
     if (m_security) {
-      ESecurityProtocol protocol = m_security->protocol();
-      switch (protocol) {
-      case ESecurityProtocol::E_TLS: {
-        m_server_socket = new TLS_SocketProxy(pipe, m_security);
-        break;
-      }
-      }
+      controller = m_security->create_controller();
     }
-    else {
-      m_server_socket = pipe;
-    }
+    m_server_socket = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, controller, ESocketHint::E_SERVER);
   }
 
   TCP_Server::~TCP_Server() {
@@ -355,7 +348,7 @@ namespace netpp {
 
     // Update how many unprocessed bytes have been transferred...
     // ---
-    
+
     //data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
 
     // Under this circumstance, the total data hasn't been determined
@@ -369,7 +362,8 @@ namespace netpp {
     char* proc_buf = nullptr;
     if (data.m_bytes_total == 0) {
       proc_buf = new char[info.m_bytes_transferred];
-    } else {
+    }
+    else {
       proc_buf = data.m_proc_buf;
     }
 
@@ -382,9 +376,9 @@ namespace netpp {
     // processed, we are able to stitch together fragmented
     // data packets incoming from the socket...
     // ---
+    char* post_out;
     int32_t true_size = pipe->proc_post_recv(
-      proc_buf + data.m_bytes_processed,
-      info.m_bytes_transferred,
+      &post_out,
       recv_buf,
       info.m_bytes_transferred
     );
@@ -410,6 +404,7 @@ namespace netpp {
 
     // Update the processed marker so the next pass is correctly offset...
     // ---
+    memcpy_s(proc_buf + data.m_bytes_processed, true_size, post_out, true_size);
     data.m_bytes_processed += true_size;
 
     // Then we attempt to identify what kind of data is coming in from
@@ -671,29 +666,24 @@ namespace netpp {
       uint64_t socket = m_awaiting_sockets.front();
       m_awaiting_sockets.pop();
 
-      ISocketPipe* client_pipe = new TCP_Socket(
-        m_server_socket, &m_recv_allocator, &m_send_allocator, ESocketHint::E_SERVER);
-
+      ISecurityController* controller = nullptr;
       if (m_security) {
-        ESecurityProtocol protocol = m_security->protocol();
-        switch (protocol) {
-        case ESecurityProtocol::E_TLS: {
-          client_pipe = new TLS_SocketProxy(client_pipe, m_security);
-          break;
-        }
-        }
+        controller = m_security->create_controller();
       }
+
+      ISocketPipe* client_pipe = new TCP_Socket(
+        m_server_socket, &m_recv_allocator, &m_send_allocator, controller, ESocketHint::E_SERVER);
 
       client_pipe->open(socket);
       client_pipe->clone_callbacks_from(m_server_socket);
 
       if (m_security) {
         m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
-        {
+        /*{
           TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
           SocketLock l = proxy->acquire_lock();
           proxy->set_accept_state();
-        }
+        }*/
       }
       else {
         m_client_sockets[socket] = SocketProcData(client_pipe);
@@ -763,32 +753,30 @@ namespace netpp {
       bool success = server->m_server_socket->accept(nullptr, [server](uint64_t socket) {
         std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
-        ISocketPipe* client_pipe = new TCP_Socket(
-          server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, ESocketHint::E_SERVER);
-
+        ISecurityController* controller = nullptr;
         if (server->m_security) {
-          ESecurityProtocol protocol = server->m_security->protocol();
-          switch (protocol) {
-          case ESecurityProtocol::E_TLS: {
-            client_pipe = new TLS_SocketProxy(client_pipe, server->m_security);
-            break;
-          }
-          }
+          controller = server->m_security->create_controller();
         }
+
+        ISocketPipe* client_pipe = new TCP_Socket(
+          server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, controller, ESocketHint::E_SERVER);
 
         client_pipe->open(socket);
         client_pipe->clone_callbacks_from(server->m_server_socket);
 
         if (server->m_security) {
           server->m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
-          {
-            TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
-            {
-              SocketLock l = proxy->acquire_lock();
-              proxy->set_accept_state();
-            }
-            proxy->proc_pending_auth(EPipeOperation::E_NONE, 0);
-          }
+
+          controller->set_accept_state();
+          client_pipe->proc_pending_auth(EPipeOperation::E_NONE, 0);
+          //{
+          //  TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
+          //  {
+          //    SocketLock l = proxy->acquire_lock();
+          //    proxy->set_accept_state();
+          //  }
+          //  proxy->proc_pending_auth(EPipeOperation::E_NONE, 0);
+          //}
         }
         else {
           server->m_client_sockets[socket] = SocketProcData(client_pipe);

@@ -19,6 +19,7 @@
 #include "allocator.h"
 #include "network.h"
 #include "protocol.h"
+#include "security.h"
 #include "http/request.h"
 #include "http/response.h"
 
@@ -70,13 +71,6 @@ namespace netpp {
   };
 
 #define IO_FLAG_PARTIAL 0x80000000
-
-  enum class EAuthState {
-    E_FAILED = -1,
-    E_NONE,
-    E_HANDSHAKE,
-    E_AUTHENTICATED,
-  };
 
   class DNS_Request;
   class DNS_Response;

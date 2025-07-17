@@ -2,14 +2,31 @@
 
 #include <filesystem>
 #include <functional>
+#include <string>
 
 namespace netpp {
+
+  class ISocketPipe;
+
+  enum class EAuthState {
+    E_FAILED = -1,
+    E_NONE,
+    E_HANDSHAKE,
+    E_AUTHENTICATED,
+  };
 
   enum class ESecurityProtocol {
     E_NONE = -1,
     E_TLS,
     E_DTLS,
   };
+
+  enum class ETransportProtocolFlags {
+    E_NONE = 0,
+    E_TCP = (1 << 0),
+    E_UDP = (1 << 1),
+  };
+  NETPP_BITWISE_ENUM(ETransportProtocolFlags)
 
   class ISecurityController {
   public:
@@ -18,7 +35,12 @@ namespace netpp {
 
     virtual ~ISecurityController() = default;
 
-    virtual ESecurityProtocol protocol() const = 0;
+    virtual bool is_authenticated() const = 0;
+    virtual bool is_failed() const = 0;
+
+    // Cast to ESecurityProtocol for default protocols
+    virtual int protocol() const = 0;
+    virtual ETransportProtocolFlags supported_transports() const = 0;
 
     virtual const std::filesystem::path& key_file() const = 0;
     virtual const std::filesystem::path& cert_file() const = 0;
@@ -27,12 +49,41 @@ namespace netpp {
     virtual const std::string& hostname() const = 0;
     virtual const std::string& password() const = 0;
 
+    virtual bool initialize() = 0;
+    virtual void deinitialize() = 0;
+
+    virtual bool set_accept_state() = 0;
+    virtual bool set_connect_state() = 0;
+
+    virtual int64_t decrypt(const char* data, size_t size, char** decrypt_out) = 0;
+    virtual int64_t encrypt(const char* data, size_t size, char** encrypt_out) = 0;
+
+    virtual EAuthState advance_handshake(ISocketPipe* pipe, int32_t post_transferred) = 0;
+
     virtual void on_error(error_cb cb) = 0;
     virtual void on_verify(verify_cb cb) = 0;
 
   protected:
     virtual void emit_error(const std::string& error) = 0;
     virtual void emit_verify() = 0;
+  };
+
+  class ISecurityFactory {
+  public:
+    virtual ~ISecurityFactory() = default;
+
+    virtual ISecurityController* create_controller() = 0;
+
+    virtual bool is_server() const = 0;
+    virtual int protocol() const = 0;
+    virtual ETransportProtocolFlags supported_transports() const = 0;
+
+    virtual const std::filesystem::path& key_file() const = 0;
+    virtual const std::filesystem::path& cert_file() const = 0;
+    virtual const std::filesystem::path& ca_file() const = 0;
+
+    virtual const std::string& hostname() const = 0;
+    virtual const std::string& password() const = 0;
   };
 
 }

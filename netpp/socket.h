@@ -19,6 +19,7 @@
 #include "allocator.h"
 #include "network.h"
 #include "protocol.h"
+#include "security.h"
 #include "http/request.h"
 #include "http/response.h"
 #include "platform/socket.h"
@@ -48,6 +49,9 @@ namespace netpp {
 
     virtual const std::string& hostname() const = 0;
     virtual const std::string& port() const = 0;
+
+    // Cast to ESecurityProtocol when using defaults
+    virtual int security() const = 0;
 
     virtual bool is_server() const = 0;
     virtual bool is_ready(EPipeOperation op) const = 0;
@@ -107,7 +111,7 @@ namespace netpp {
     virtual void* user_data() const = 0;
 
     virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
-    virtual int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) = 0;
+    virtual int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) = 0;
 
     virtual const SocketIOInfo& get_io_info() const = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
@@ -123,7 +127,8 @@ namespace netpp {
   class NETPP_API TCP_Socket : public ISocketPipe {
   public:
     TCP_Socket(ISocketPipe* root_socket,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint = ESocketHint::E_NONE);
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator,
+      ISecurityController* security = nullptr, ESocketHint hint = ESocketHint::E_NONE);
 
     ~TCP_Socket() override {}
 
@@ -131,6 +136,8 @@ namespace netpp {
 
     const std::string& hostname() const override { return m_host_name; }
     const std::string& port() const override { return m_port; }
+
+    int security() const override { return m_security->protocol(); }
 
     bool is_server() const override { return m_socket_layer->is_server(); }
     bool is_ready(EPipeOperation op) const override { return m_socket_layer->is_ready(op); }
@@ -148,17 +155,13 @@ namespace netpp {
 
     SocketLock acquire_lock() override { return m_socket_layer->acquire_lock(); }
 
-    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
-      return m_socket_layer->accept(accept_cond, accept_routine);
-    }
+    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
     bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
       return m_socket_layer->bind_and_listen(addr, backlog);
     }
 
-    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override {
-      return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
-    }
+    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
 
     EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
@@ -208,11 +211,8 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
-    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
-    int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
-      memcpy_s(out_data, out_size, in_data, in_size);
-      return out_size;
-    }
+    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
+    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
@@ -239,6 +239,8 @@ namespace netpp {
 
     ESocketHint m_hint = ESocketHint::E_NONE;
     ISocketOSSupportLayer* m_socket_layer;
+
+    ISecurityController* m_security;
   };
 
   /// <summary>
@@ -271,17 +273,13 @@ namespace netpp {
 
     SocketLock acquire_lock() override { return m_socket_layer->acquire_lock(); }
 
-    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override {
-      return m_socket_layer->accept(accept_cond, accept_routine);
-    }
+    bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
     bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
       return m_socket_layer->bind_and_listen(addr, backlog);
     }
 
-    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override {
-      return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
-    }
+    bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
 
     EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) override;
 
@@ -330,11 +328,8 @@ namespace netpp {
     void* sys_data() const override { return m_socket_layer->sys_data(); }
     void* user_data() const override { return m_socket_layer->user_data(); }
 
-    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override { return EAuthState::E_NONE; }
-    int32_t proc_post_recv(char* out_data, uint32_t out_size, const char* in_data, uint32_t in_size) override {
-      memcpy_s(out_data, out_size, in_data, in_size);
-      return out_size;
-    }
+    EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
+    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
@@ -361,6 +356,8 @@ namespace netpp {
 
     ESocketHint m_hint = ESocketHint::E_NONE;
     ISocketOSSupportLayer* m_socket_layer;
+
+    ISecurityController* m_security;
   };
 
   bool sockets_initialize();

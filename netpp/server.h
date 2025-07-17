@@ -72,7 +72,7 @@ namespace netpp {
   class NETPP_API TCP_Server final : public IServer {
   public:
     TCP_Server() = delete;
-    TCP_Server(ISecurityController *security, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
+    TCP_Server(ISecurityFactory *security, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
     ~TCP_Server();
 
     bool is_running() const override;
@@ -169,7 +169,7 @@ namespace netpp {
     std::recursive_mutex m_mutex;
     bool m_stop_flag;
 
-    ISecurityController* m_security;
+    ISecurityFactory* m_security;
   };
 
   class NETPP_API UDP_Server final : public IServer {

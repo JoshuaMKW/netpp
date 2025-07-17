@@ -2,7 +2,7 @@
 
 namespace netpp {
 
-  const HTTP_Response* HTTP_Router::signal_method(const HTTP_Request* request) {
+  HTTP_Response* HTTP_Router::signal_method(const HTTP_Request* request) {
     if (!request) {
       return nullptr;
     }

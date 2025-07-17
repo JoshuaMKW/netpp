@@ -151,7 +151,7 @@ namespace netpp {
     }
   }
 
-  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, ISecurityController *security) {
+  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, ISecurityFactory *security) {
     EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_RAW;
     // Check here for HTTPS
 
