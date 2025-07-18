@@ -176,7 +176,7 @@ namespace netpp {
     EIOState last_state = m_socket_layer->state(EPipeOperation::E_SEND);
 
     if (last_state == EIOState::E_PARTIAL) {
-      if (!flags || (*flags & IO_FLAG_PARTIAL) == 0) {
+      if (!flags || (*flags & (uint32_t)ESendFlags::E_PARTIAL_IO) == 0) {
         // The socket is busy, call again
         // after the transaction confirms
         return EIOState::E_BUSY;
@@ -286,7 +286,7 @@ namespace netpp {
       return EAuthState::E_FAILED;
     }
 
-    return m_security->advance_handshake(this, post_transferred);
+    return m_security->advance_handshake(this, last_op, post_transferred);
   }
 
   int32_t UDP_Socket::proc_post_recv(char** out_data, const char* in_data, uint32_t in_size)

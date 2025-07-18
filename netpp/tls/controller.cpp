@@ -9,7 +9,8 @@
 
 namespace netpp {
 
-  TLSSecurityController::TLSSecurityController(const TLSSecurityFactory* factory) : m_factory(factory), m_initialized(false) {}
+  TLSSecurityController::TLSSecurityController(const TLSSecurityFactory* factory)
+    : m_factory(factory), m_initialized(false), m_ssl(), m_in_bio(), m_out_bio(), m_tls_ctx() {}
 
   bool TLSSecurityController::is_authenticated() const { return m_handshake_state == EAuthState::E_AUTHENTICATED; }
   bool TLSSecurityController::is_failed() const { return m_handshake_state == EAuthState::E_FAILED; }
@@ -141,6 +142,10 @@ namespace netpp {
 
   void TLSSecurityController::deinitialize()
   {
+    if (!m_initialized) {
+      return;
+    }
+
     SSL_CTX_free(m_tls_ctx);
     m_tls_ctx = nullptr;
 
@@ -171,16 +176,13 @@ namespace netpp {
     return true;
   }
 
-  EAuthState TLSSecurityController::advance_handshake(ISocketPipe* pipe, int32_t post_transferred)
+  EAuthState TLSSecurityController::advance_handshake(ISocketPipe* pipe, EPipeOperation last_op, int32_t post_transferred)
   {
     int result = 0;
-    int32_t transferred = post_transferred;
+    int32_t recv_transferred = last_op == EPipeOperation::E_RECV ? post_transferred : 0;
+    int32_t send_transferred = last_op == EPipeOperation::E_SEND ? post_transferred : 0;
 
     SocketLock l = pipe->acquire_lock();
-
-    if (SSL_is_init_finished(m_ssl)) {
-      return EAuthState::E_AUTHENTICATED;
-    }
 
     EProcState proc_state = EProcState::E_READY;
     bool wants_recv = false;
@@ -191,52 +193,64 @@ namespace netpp {
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully
-        if (!m_factory->is_server()) {
-          handshake_send_state(pipe, 0, &transferring);
-        }
-        int pending = SSL_pending(m_ssl);
-        if (pending > 0) {
-          char* buf = new char[pending];
-          if (SSL_read(m_ssl, buf, pending) > 0) {
-            fprintf(stdout, "%d\n", pending);
-          }
-        }
-        m_handshake_state = EAuthState::E_AUTHENTICATED;
-        return EAuthState::E_AUTHENTICATED;
-      }
 
-      int err = SSL_get_error(m_ssl, result);
-      if (err == SSL_ERROR_WANT_READ) {
+        if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
+          return m_handshake_state;
+        }
+
+        //if (!m_factory->is_server()) {
+        //  handshake_send_state(pipe, 0, &transferring);
+        //}
+
+#if 0
         proc_state = handshake_recv_state(pipe, transferred);
         handshake_send_state(pipe, 0, &transferring);
-      }
-      else if (err == SSL_ERROR_WANT_WRITE) {
-        if (m_factory->is_server()) {
-          proc_state = handshake_send_state(pipe, transferred, &transferring);
-          wants_recv = transferring > 0;
+
+        if (proc_state == EProcState::E_FINISHED) {
+          m_handshake_state = EAuthState::E_AUTHENTICATED;
+          return EAuthState::E_AUTHENTICATED;
         }
-        else {
-          proc_state = handshake_send_state(pipe, transferred, &transferring);
-          wants_recv = transferring > 0;
-        }
+#else
+        m_handshake_state = EAuthState::E_AUTHENTICATED;
+        return m_handshake_state;
+#endif
       }
       else {
-        int ssl_err = SSL_get_error(m_ssl, result);
-
-        if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
-          unsigned long err = ERR_get_error();
-          if (err == 0) {
-            fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
+        // The handshake either errored or is searching for more data
+        int err = SSL_get_error(m_ssl, result);
+        if (err == SSL_ERROR_WANT_READ) {
+          proc_state = handshake_recv_state(pipe, recv_transferred);
+          handshake_send_state(pipe, 0, &transferring);
+        }
+        else if (err == SSL_ERROR_WANT_WRITE) {
+          if (m_factory->is_server()) {
+            proc_state = handshake_send_state(pipe, send_transferred, &transferring);
+            wants_recv = transferring > 0;
           }
           else {
-            fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+            proc_state = handshake_send_state(pipe, send_transferred, &transferring);
+            wants_recv = transferring > 0;
           }
         }
-        m_handshake_state = EAuthState::E_FAILED;
-        return EAuthState::E_FAILED;
+        else {
+          int ssl_err = SSL_get_error(m_ssl, result);
+
+          if (ssl_err == SSL_ERROR_SYSCALL || ssl_err == SSL_ERROR_SSL) {
+            unsigned long err = ERR_get_error();
+            if (err == 0) {
+              fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
+            }
+            else {
+              fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+            }
+          }
+          m_handshake_state = EAuthState::E_FAILED;
+          return EAuthState::E_FAILED;
+        }
       }
       m_handshake_initiated = true;
-      transferred = 0;
+      recv_transferred = 0;
+      send_transferred = 0;
       continue;
     }
 
@@ -331,7 +345,9 @@ namespace netpp {
         return EProcState::E_WAITING;
       }
 
-      uint32_t flags_ = 0;
+      // "Insecure" send, because it is pre-encrypted handshake data
+      // This prevents the encrypted handshake data from being encrypted again
+      uint32_t flags_ = (uint32_t)ESendFlags::E_FORCE_INSECURE;
       EIOState state = pipe->send(tls_out, bytes_to_send, &flags_);
 
       if (state == EIOState::E_BUSY || state == EIOState::E_ERROR) {
@@ -362,6 +378,10 @@ namespace netpp {
         return EProcState::E_FAILED;
       }
 
+      //if (is_tls_record_finish(recv_buf)) {
+      //  return EProcState::E_FINISHED;
+      //}
+
       return EProcState::E_READY;
     }
 
@@ -385,6 +405,11 @@ namespace netpp {
 
   void TLSSecurityController::emit_error(const std::string& error) { m_error_cb(error); }
   void TLSSecurityController::emit_verify() { m_verify_cb(); }
+
+  bool TLSSecurityController::is_tls_record_finish(const char* record)
+  {
+    return record[0] == '\x16' && record[3] == '\x00' && record[4] == '\x40';
+  }
 
   TLSSecurityFactory::TLSSecurityFactory(
     bool is_server, const std::filesystem::path& key_file, const std::filesystem::path& cert_file,

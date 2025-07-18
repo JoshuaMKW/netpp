@@ -46,12 +46,13 @@ namespace netpp {
     int64_t decrypt(const char* data, size_t size, char** decrypt_out) override;
     int64_t encrypt(const char* data, size_t size, char** encrypt_out) override;
 
-    virtual EAuthState advance_handshake(ISocketPipe* pipe, int32_t post_transferred) override;
+    virtual EAuthState advance_handshake(ISocketPipe* pipe, EPipeOperation last_op, int32_t post_transferred) override;
 
     enum class EProcState {
       E_FAILED,
       E_WAITING,
       E_READY,
+      E_FINISHED,
     };
 
     EProcState handshake_send_state(ISocketPipe* pipe, int32_t post_transferred, int32_t* out_transferring);
@@ -63,6 +64,8 @@ namespace netpp {
   protected:
     void emit_error(const std::string& error) override;
     void emit_verify() override;
+
+    static bool is_tls_record_finish(const char* record);
 
   private:
     const TLSSecurityFactory* m_factory;

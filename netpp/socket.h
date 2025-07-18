@@ -26,6 +26,42 @@
 
 namespace netpp {
 
+  class ISocketPipe;
+  class ISecurityController;
+  class ISecurityFactory;
+
+  struct SocketIOInfo {
+    ISocketPipe* m_pipe;
+
+    SocketIOState m_recv_state;
+    SocketIOState m_send_state;
+
+    EPipeOperation m_last_op;
+
+    bool m_proc_handshake;
+  };
+
+  struct SocketProcData {
+    SocketProcData() {
+      m_pipe = nullptr;
+      m_proc_buf = nullptr;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+    }
+
+    SocketProcData(ISocketPipe* pipe) {
+      m_pipe = pipe;
+      m_proc_buf = nullptr;
+      m_bytes_total = 0;
+      m_bytes_processed = 0;
+    }
+
+    ISocketPipe* m_pipe;
+    char* m_proc_buf;
+    uint32_t m_bytes_processed;
+    uint32_t m_bytes_total;
+  };
+
   class NETPP_API ISocketPipe {
   public:
     using close_cb = std::function<bool(ISocketPipe*)>;

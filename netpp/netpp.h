@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #ifdef NETPP_STATIC
 #define NETPP_API
 #else

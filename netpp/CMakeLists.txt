@@ -38,7 +38,7 @@ add_library(netpp STATIC
     udp/socket.cpp
     udp/client.cpp
     udp/server.cpp
- "http/router.h" "http/router.cpp")
+ "http/router.h" "http/router.cpp" "sockenum.h")
 
 # Include directories
 target_include_directories(netpp PRIVATE

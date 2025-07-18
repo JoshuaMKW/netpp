@@ -490,7 +490,7 @@ namespace netpp {
       //sock_data.m_send_state.m_bytes_transferred = info.m_bytes_transferred;
       //sock_data.m_last_op = EPipeOperation::E_SEND;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_SEND, false);
-      break;
+      return true;
     }
     case EPipeOperation::E_CLOSE: {
       pipe->close();
@@ -608,7 +608,7 @@ namespace netpp {
 
       const int32_t bytes_left = sock_data.m_send_state.m_bytes_total - sock_data.m_send_state.m_bytes_transferred;
       if (bytes_left > 0) {
-        uint32_t flags = IO_FLAG_PARTIAL;
+        uint32_t flags = (uint32_t)ESendFlags::E_PARTIAL_IO;
 
         // Send the remaining data
         EIOState state = pipe->send(

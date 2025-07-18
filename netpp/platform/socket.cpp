@@ -769,6 +769,8 @@ namespace netpp {
         m_send_buffer->len = chunk_size;
 
         uint32_t flags_ = flags ? *flags : 0;
+        flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
+        flags_ &= (uint32_t)~ESendFlags::E_PARTIAL_IO;
 
 #if CLIENT_USE_WSA
         int rc = ::WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
@@ -1423,14 +1425,16 @@ namespace netpp {
         uint32_t block_size = m_send_allocator->block_size();
         int32_t bytes_sent = 0;
 
+        uint32_t flags_ = flags ? *flags : 0;
+        flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
+        flags_ &= (uint32_t)~ESendFlags::E_PARTIAL_IO;
+
         while (bytes_sent < size) {
           uint32_t chunk_size = min(size - bytes_sent, block_size);
           memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
           m_send_buffer->Length = (ULONG)chunk_size;
 
-          uint32_t flags_ = flags ? *flags : 0;
-
-          BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~IO_FLAG_PARTIAL, m_send_buffer);
+          BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_, m_send_buffer);
           if (rc) {
             m_send_buffer->IsBusy = TRUE;
             bytes_sent += chunk_size;

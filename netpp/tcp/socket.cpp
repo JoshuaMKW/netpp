@@ -116,7 +116,24 @@ namespace netpp {
       }
     }
 
-    return m_socket_layer->connect(timeout, recv_flowspec, send_flowspec);
+    if (!m_socket_layer->connect(timeout, recv_flowspec, send_flowspec)) {
+      return false;
+    }
+
+    if (m_security) {
+      if (proc_pending_auth(EPipeOperation::E_NONE, 0) == EAuthState::E_FAILED) {
+        return false;
+      }
+
+      while (!m_security->is_authenticated()) {
+        std::this_thread::sleep_for(16ms);
+        if (m_security->is_failed()) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   EIOState TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
@@ -157,19 +174,21 @@ namespace netpp {
     const char* data_ptr = data;
     int64_t data_size = size;
     if (m_security) {
-      ETransportProtocolFlags transports = m_security->supported_transports();
-      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
-        return EIOState::E_ERROR;
+      if (!flags || (*flags & (uint32_t)ESendFlags::E_FORCE_INSECURE) == (uint32_t)ESendFlags::E_NONE) {
+        ETransportProtocolFlags transports = m_security->supported_transports();
+        if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+          return EIOState::E_ERROR;
+        }
+
+        char* the_data;
+
+        data_size = m_security->encrypt(data, size, &the_data);
+        if (data_size == -1) {
+          return EIOState::E_ERROR;
+        }
+
+        data_ptr = the_data;
       }
-
-      char* the_data;
-
-      data_size = m_security->encrypt(data, size, &the_data);
-      if (data_size == -1) {
-        return EIOState::E_ERROR;
-      }
-
-      data_ptr = the_data;
     }
 
     SocketIOState& io_state = m_io_info.m_send_state;
@@ -177,7 +196,7 @@ namespace netpp {
     EIOState last_state = m_socket_layer->state(EPipeOperation::E_SEND);
 
     if (last_state == EIOState::E_PARTIAL) {
-      if (!flags || (*flags & IO_FLAG_PARTIAL) == 0) {
+      if (!flags || (*flags & (uint32_t)ESendFlags::E_PARTIAL_IO) == 0) {
         // The socket is busy, call again
         // after the transaction confirms
         return EIOState::E_BUSY;
@@ -287,7 +306,7 @@ namespace netpp {
       return EAuthState::E_FAILED;
     }
 
-    return m_security->advance_handshake(this, post_transferred);
+    return m_security->advance_handshake(this, last_op, post_transferred);
   }
 
   int32_t TCP_Socket::proc_post_recv(char** out_data, const char* in_data, uint32_t in_size)

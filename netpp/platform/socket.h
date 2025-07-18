@@ -19,60 +19,13 @@
 #include "allocator.h"
 #include "network.h"
 #include "protocol.h"
-#include "security.h"
+#include "sockenum.h"
 #include "http/request.h"
 #include "http/response.h"
 
 namespace netpp {
 
-  enum class ESocketErrorReason {
-    E_NONE = -1,
-    E_REASON_STARTUP,
-    E_REASON_PORT,
-    E_REASON_RESOURCES,
-    E_REASON_SOCKET,
-    E_REASON_BIND,
-    E_REASON_LISTEN,
-    E_REASON_THREADS,
-    E_REASON_SEND,
-    E_REASON_ADDRESS,
-    E_REASON_ACCEPT,
-    E_REASON_CONNECT,
-    E_REASON_RECV,
-    E_REASON_SENDTO,
-    E_REASON_RECVFROM,
-    E_REASON_CORRUPT,
-    E_REASON_ADAPTER_UNKNOWN,
-    E_REASON_ADAPTER_FAIL,
-    E_COUNT,
-  };
-
-  enum class EPipeOperation {
-    E_NONE,  // Can be used to check for connectivity status using pipe->is_ready
-    E_RECV,
-    E_SEND,
-    E_RECV_SEND,
-    E_CLOSE,
-  };
-
-  enum class ESocketHint {
-    E_NONE,
-    E_SERVER,
-    E_CLIENT,
-  };
-
-  enum class EIOState {
-    E_NONE,
-    E_ERROR,
-    E_BUSY,
-    E_ASYNC,
-    E_PARTIAL,
-    E_COMPLETE,
-  };
-
-#define IO_FLAG_PARTIAL 0x80000000
-
-  class DNS_Request;
+    class DNS_Request;
   class DNS_Response;
   class HTTP_Request;
   class HTTP_Response;
@@ -112,38 +65,6 @@ namespace netpp {
       delete[] m_proc_buf;
       m_proc_buf = nullptr;
     }
-  };
-
-  struct NETPP_API SocketIOInfo {
-    ISocketPipe* m_pipe;
-
-    SocketIOState m_recv_state;
-    SocketIOState m_send_state;
-
-    EPipeOperation m_last_op;
-
-    bool m_proc_handshake;
-  };
-
-  struct SocketProcData {
-    SocketProcData() {
-      m_pipe = nullptr;
-      m_proc_buf = nullptr;
-      m_bytes_total = 0;
-      m_bytes_processed = 0;
-    }
-
-    SocketProcData(ISocketPipe* pipe) {
-      m_pipe = pipe;
-      m_proc_buf = nullptr;
-      m_bytes_total = 0;
-      m_bytes_processed = 0;
-    }
-
-    ISocketPipe* m_pipe;
-    char* m_proc_buf;
-    uint32_t m_bytes_processed;
-    uint32_t m_bytes_total;
   };
 
   class ISocketOSSupportLayer;

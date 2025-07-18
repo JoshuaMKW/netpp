@@ -4,10 +4,11 @@
 #include <functional>
 #include <string>
 
+#include "sockenum.h"
+
 namespace netpp {
 
   class ISocketPipe;
-
   enum class EAuthState {
     E_FAILED = -1,
     E_NONE,
@@ -28,7 +29,7 @@ namespace netpp {
   };
   NETPP_BITWISE_ENUM(ETransportProtocolFlags)
 
-  class ISecurityController {
+  class NETPP_API ISecurityController {
   public:
     using error_cb = std::function<void(const std::string&)>;
     using verify_cb = std::function<void()>;
@@ -58,7 +59,7 @@ namespace netpp {
     virtual int64_t decrypt(const char* data, size_t size, char** decrypt_out) = 0;
     virtual int64_t encrypt(const char* data, size_t size, char** encrypt_out) = 0;
 
-    virtual EAuthState advance_handshake(ISocketPipe* pipe, int32_t post_transferred) = 0;
+    virtual EAuthState advance_handshake(ISocketPipe* pipe, EPipeOperation last_op, int32_t post_transferred) = 0;
 
     virtual void on_error(error_cb cb) = 0;
     virtual void on_verify(verify_cb cb) = 0;
@@ -68,7 +69,7 @@ namespace netpp {
     virtual void emit_verify() = 0;
   };
 
-  class ISecurityFactory {
+  class NETPP_API ISecurityFactory {
   public:
     virtual ~ISecurityFactory() = default;
 
