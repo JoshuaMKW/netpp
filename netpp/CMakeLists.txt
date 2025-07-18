@@ -28,8 +28,8 @@ add_library(netpp STATIC
 
     
     
-    tls/controller.h
-    tls/controller.cpp
+    "tls/security.h"
+    "tls/security.cpp"
 
     tcp/socket.cpp
     tcp/client.cpp

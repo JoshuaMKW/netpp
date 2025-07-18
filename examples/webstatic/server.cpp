@@ -6,7 +6,8 @@
 
 #include "socket.h"
 #include "server.h"
-#include "tls/controller.h"
+#include "http/router.h"
+#include "tls/security.h"
 
 #include "network.h"
 
@@ -61,6 +62,48 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  HTTP_Router http_router;
+
+  http_router.on_get("/", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream html_file("./webdata/index.html");
+
+    if (!html_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string html_content((std::istreambuf_iterator<char>(html_file)), std::istreambuf_iterator<char>());
+
+    return get_response("text/html", html_content);
+    });
+
+  http_router.on_get("/index.css", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream css_file("./webdata/index.css");
+
+    if (!css_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
+
+    return get_response("text/css", css_content);
+    });
+
+  http_router.on_get("/index.css", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream favicon_file("./webdata/favicon.ico");
+
+    if (!favicon_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string favicon_content((std::istreambuf_iterator<char>(favicon_file)), std::istreambuf_iterator<char>());
+
+    return get_response("image/x-icon", favicon_content);
+    });
+
+  http_router.on_unhandled([](const HTTP_Request* request) -> HTTP_Response* {
+    return method_not_allowed_response();
+    });
+
 #if SERVER_USE_TLS
   TLSSecurityFactory* security
     = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, SERVER_CACERT, "localhost", SERVER_CERT_PASSWD,
@@ -69,8 +112,14 @@ int main(int argc, char** argv) {
   TLSSecurityFactory* security = nullptr;
 #endif
 
+  // Create a server instance with TLS security and 1024 sockets
   TCP_Server server(security, 1024);
 
+  server.on_http_request([&http_router](const ISocketPipe* source, const HTTP_Request* request) {
+    return http_router.signal_method(request);
+    });
+
+  // Start the server and enter a loop
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
   }
@@ -78,50 +127,6 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Failed to start the server\n");
     return 1;
   }
-
-  server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
-    //printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
-
-    if (request->method() != EHTTP_RequestMethod::E_REQUEST_GET) {
-      return method_not_allowed_response();
-    }
-
-    if (request->path() == "/") {
-      std::ifstream html_file("./webdata/index.html");
-
-      if (!html_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string html_content((std::istreambuf_iterator<char>(html_file)), std::istreambuf_iterator<char>());
-
-      return get_response("text/html", html_content);
-    }
-
-    if (request->path() == "/index.css") {
-      std::ifstream css_file("./webdata/index.css");
-      if (!css_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
-
-      return get_response("text/css", css_content);
-    }
-
-    if (request->path() == "/favicon.ico") {
-      std::ifstream favicon_file("./webdata/favicon.ico");
-      if (!favicon_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string favicon_content((std::istreambuf_iterator<char>(favicon_file)), std::istreambuf_iterator<char>());
-
-      return get_response("image/x-icon", favicon_content);
-    }
-
-    return not_found_response();
-    });
 
   while (server.is_running()) {
     std::this_thread::sleep_for(100ms);
