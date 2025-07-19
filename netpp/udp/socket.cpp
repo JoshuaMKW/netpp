@@ -13,12 +13,15 @@ using namespace std::chrono_literals;
 namespace netpp {
 
   UDP_Socket::UDP_Socket(ISocketPipe* root_socket,
-    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint)
-    : m_hint(hint), m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ISecurityController* security, ESocketHint hint)
+    : m_security(security), m_hint(hint),
+    m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+    
     ISocketOSSupportLayer* layer = nullptr;
     if (root_socket) {
       layer = root_socket->get_os_layer();
     }
+
     m_socket_layer = SocketOSSupportLayerFactory::create(
       layer,
       recv_allocator, send_allocator,
@@ -36,7 +39,7 @@ namespace netpp {
 
     if (m_security) {
       ETransportProtocolFlags transports = m_security->supported_transports();
-      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
         m_socket_layer->close();
         return false;
       }
@@ -66,7 +69,7 @@ namespace netpp {
 
     if (m_security) {
       ETransportProtocolFlags transports = m_security->supported_transports();
-      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
         m_socket_layer->close();
         return false;
       }
@@ -90,7 +93,7 @@ namespace netpp {
   {
     if (m_security) {
       ETransportProtocolFlags transports = m_security->supported_transports();
-      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
         return false;
       }
 
@@ -106,7 +109,7 @@ namespace netpp {
   {
     if (m_security) {
       ETransportProtocolFlags transports = m_security->supported_transports();
-      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
         return false;
       }
 
@@ -282,7 +285,7 @@ namespace netpp {
     }
 
     ETransportProtocolFlags transports = m_security->supported_transports();
-    if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+    if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
       return EAuthState::E_FAILED;
     }
 
@@ -298,7 +301,7 @@ namespace netpp {
     }
 
     ETransportProtocolFlags transports = m_security->supported_transports();
-    if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+    if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
       return -1;
     }
 

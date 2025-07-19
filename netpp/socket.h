@@ -285,7 +285,8 @@ namespace netpp {
   class NETPP_API UDP_Socket : public ISocketPipe {
   public:
     UDP_Socket(ISocketPipe* root_socket,
-      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint = ESocketHint::E_NONE);
+      StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator,
+      ISecurityController* security = nullptr, ESocketHint hint = ESocketHint::E_NONE);
 
     ~UDP_Socket() override {}
 
@@ -293,6 +294,8 @@ namespace netpp {
 
     const std::string& hostname() const override { return m_host_name; }
     const std::string& port() const override { return m_port; }
+
+    int security() const override { return m_security->protocol(); }
 
     bool is_server() const override { return m_socket_layer->is_server(); }
     bool is_ready(EPipeOperation op) const override { return m_socket_layer->is_ready(op); }

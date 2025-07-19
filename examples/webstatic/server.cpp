@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 #endif
 
   // Create a server instance with TLS security and 1024 sockets
-  TCP_Server server(security, 1024);
+  TCP_Server server(nullptr, 1024);
 
   server.on_http_request([&http_router](const ISocketPipe* source, const HTTP_Request* request) {
     return http_router.signal_method(request);

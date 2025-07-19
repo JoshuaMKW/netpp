@@ -582,9 +582,11 @@ namespace netpp {
     }
 
     bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
+#if CLIENT_UDP_CONNECTIONLESS
       if (m_protocol == ETransportLayerProtocol::E_UDP) {
         return false;
       }
+#endif
 
 #if CLIENT_USE_WSA
       // Check if the connection is still alive

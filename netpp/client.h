@@ -168,7 +168,7 @@ namespace netpp {
   class NETPP_API UDP_Client final : public IClient {
   public:
     UDP_Client() = delete;
-    UDP_Client(ISecurityController* security, uint32_t bufsize = 0);
+    UDP_Client(ISecurityFactory* security, uint32_t bufsize = 0);
     ~UDP_Client();
 
     bool is_running() const override;
@@ -253,7 +253,7 @@ namespace netpp {
     bool m_handshake_done;
     EAuthState m_handshake_state;
 
-    ISecurityController* m_security;
+    ISecurityFactory* m_security;
   };
 
 }  // namespace netpp

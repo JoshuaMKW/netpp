@@ -175,7 +175,7 @@ namespace netpp {
   class NETPP_API UDP_Server final : public IServer {
   public:
     UDP_Server() = delete;
-    UDP_Server(ISecurityController* security, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
+    UDP_Server(ISecurityFactory* security, uint32_t bufcount, uint32_t desired_bufsize = 0, int max_threads = -1);
     ~UDP_Server();
 
     bool is_running() const override;
@@ -247,7 +247,6 @@ namespace netpp {
 
     std::unordered_map<uint64_t, SocketProcData> m_pending_auth_sockets;
     std::unordered_map<uint64_t, SocketProcData> m_client_sockets;
-    std::unordered_map<uint64_t, std::thread> m_socket_threads;
 
     std::queue<uint64_t> m_awaiting_sockets;
     std::queue<uint64_t> m_purgatory_sockets;
@@ -269,7 +268,7 @@ namespace netpp {
     std::recursive_mutex m_mutex;
     bool m_stop_flag;
 
-    ISecurityController* m_security;
+    ISecurityFactory* m_security;
   };
 
 } // namespace netpp
