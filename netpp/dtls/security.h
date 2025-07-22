@@ -78,6 +78,7 @@ namespace netpp {
     SSL* m_ssl;
     BIO* m_in_bio;
     BIO* m_out_bio;
+    BIO_ADDR* m_client;
     std::atomic<bool> m_handshake_initiated;
     std::atomic<EAuthState> m_handshake_state;
   };

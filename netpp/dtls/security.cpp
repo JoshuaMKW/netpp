@@ -5,7 +5,28 @@
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 
+#include "dtls/cookie.h"
 #include "dtls/security.h"
+
+static int DTLS_CookieGenerateCallback(SSL* ssl_ctx, unsigned char* cookie, unsigned int* cookie_len) {
+  // TODO: Snag peer information for cookie generation.
+  // ...
+
+  // netpp::cookie_generate(peer, peerlen, cookie, cookie_len);
+
+  return 1;
+}
+
+static int DTLS_CookieVerifyCallback(SSL* ssl_ctx, const unsigned char* cookie, unsigned int cookie_len) {
+  // TODO: Snag peer information for cookie generation.
+  // ...
+
+  // if (netpp::cookie_secrets_exist(peer, peerlen, cookie, cookie_len)) {
+  //   return 1;
+  // }
+
+  return 0;
+}
 
 namespace netpp {
 
@@ -141,11 +162,29 @@ namespace netpp {
     sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
+    SSL_CTX_set_cookie_generate_cb(m_dtls_ctx, DTLS_CookieGenerateCallback);
+    SSL_CTX_set_cookie_verify_cb(m_dtls_ctx, DTLS_CookieVerifyCallback);
+
     //timeval timeout = { 5, 0 }; // 5 Seconds
     //BIO_ctrl(m_in_bio, BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout);
     //BIO_ctrl(m_in_bio, )
 
-    //  DTLSv1_listen();
+    // Get initial peer information
+    m_client = BIO_ADDR_new();
+    int res = DTLSv1_listen(m_ssl, m_client);
+    if (res != 1) {
+      // The handshake either errored or is searching for more data
+      int err = SSL_get_error(m_ssl, res);
+      if (err != SSL_ERROR_NONE) {
+        int err_err = ERR_get_error();
+        if (err_err == 0) {
+          fprintf(stderr, "SSL_ERROR_SYSCALL: probably EOF or no I/O attempted.\n");
+        }
+        else {
+          fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err_err, nullptr));
+        }
+      }
+    }
 
     m_initialized = true;
     m_handshake_state = EAuthState::E_NONE;
@@ -203,6 +242,7 @@ namespace netpp {
     while (proc_state == EProcState::E_READY) {
     update_handshake:
       result = SSL_do_handshake(m_ssl);
+      //DTLSv1_listen();
       if (result == 1) {
         // Handshake completed successfully
 
