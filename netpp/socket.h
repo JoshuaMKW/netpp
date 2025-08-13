@@ -108,7 +108,8 @@ namespace netpp {
     virtual SocketLock acquire_lock() = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
-    virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
+    virtual bool bind(const char* addr = nullptr) = 0;
+    virtual bool listen(uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
     virtual EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
@@ -193,8 +194,12 @@ namespace netpp {
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
-    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
-      return m_socket_layer->bind_and_listen(addr, backlog);
+    bool bind(const char* addr = nullptr) override {
+      return m_socket_layer->bind(addr);
+    }
+
+    bool listen(uint32_t backlog = 0x7FFFFFFF) override {
+      return m_socket_layer->listen(backlog);
     }
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
@@ -314,8 +319,12 @@ namespace netpp {
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
-    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
-      return m_socket_layer->bind_and_listen(addr, backlog);
+    bool bind(const char* addr = nullptr) override {
+      return m_socket_layer->bind(addr);
+    }
+
+    bool listen(uint32_t backlog = 0x7FFFFFFF) override {
+      return m_socket_layer->listen(backlog);
     }
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;

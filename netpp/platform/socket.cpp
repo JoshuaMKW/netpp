@@ -124,11 +124,19 @@ namespace netpp {
   static WSADATA wsa_data;
 
   bool sockets_initialize() {
+    if (wsa_data.iMaxSockets > 0 && wsa_data.wVersion == 2) {
+      return true;
+    }
+
     // Initialize Winsock
     return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
   }
 
   void sockets_deinitialize() {
+    if (wsa_data.iMaxSockets == 0 || wsa_data.wVersion != 2) {
+      return;
+    }
+
     WSACleanup();
   }
 
@@ -152,14 +160,53 @@ namespace netpp {
     E_START,
   };
 
-  RIO_EXTENSION_FUNCTION_TABLE* s_rio;
+  RIO_EXTENSION_FUNCTION_TABLE* s_rio = nullptr;
+  LPFN_WSARECVMSG s_WSARecvMsg = nullptr;
+  LPFN_WSASENDMSG s_WSASendMsg = nullptr;
+
+  static int _win32_init_wsa(SOCKET in_sock) {
+    sockets_initialize();
+
+    DWORD bytes = 0;
+    GUID wsa_recvmsg_guid = WSAID_WSARECVMSG;
+    GUID wsa_sendmsg_guid = WSAID_WSASENDMSG;
+
+    if (s_WSARecvMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSARecvMsg, sizeof(s_WSARecvMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    if (s_WSASendMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSASendMsg, sizeof(s_WSASendMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    return 0;
+  }
+
+  static int _win32_deinit_wsa(SOCKET in_sock) {
+    sockets_deinitialize();
+    s_WSARecvMsg = nullptr;
+    s_WSASendMsg = nullptr;
+    return 0;
+  }
 
   static int _win32_init_rio(SOCKET in_sock) {
     if (s_rio) {
       return 0;
     }
 
-    sockets_initialize();
+    _win32_init_wsa(in_sock);
 
     s_rio = new RIO_EXTENSION_FUNCTION_TABLE();
 
@@ -184,7 +231,7 @@ namespace netpp {
   }
 
   static int _win32_deinit_rio(SOCKET in_sock) {
-    sockets_initialize();
+    _win32_deinit_wsa(in_sock);
 
     if (!s_rio) {
       return 0;
@@ -274,11 +321,11 @@ namespace netpp {
       bool result = true;
 
       if (m_recv_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes, m_socket });
       }
 
       if (m_send_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes, m_socket });
       }
 
       return result;
@@ -288,6 +335,7 @@ namespace netpp {
     ISocketOSSupportLayer* m_pipe;
     uint32_t m_recv_bytes;
     uint32_t m_send_bytes;
+    uint64_t m_socket;
   };
 
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
@@ -577,7 +625,11 @@ namespace netpp {
       return false;
     }
 
-    bool bind_and_listen(const char* addr, uint32_t backlog) override {
+    bool bind(const char* addr) override {
+      return false;
+    }
+
+    bool listen(uint32_t backlog) override {
       return false;
     }
 
@@ -1367,7 +1419,7 @@ namespace netpp {
         return true;
       }
 
-      bool bind_and_listen(const char* addr, uint32_t backlog) override {
+      bool bind(const char* addr) override {
         sockaddr_in server_addr;
         ::ZeroMemory(&server_addr, sizeof(server_addr));
 
@@ -1383,6 +1435,14 @@ namespace netpp {
 
         if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
           error(ESocketErrorReason::E_REASON_BIND);
+          return false;
+        }
+
+        return true;
+      }
+
+      bool listen(uint32_t backlog) override {
+        if (m_protocol == ETransportLayerProtocol::E_UDP) {
           return false;
         }
 

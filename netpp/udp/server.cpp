@@ -287,7 +287,7 @@ namespace netpp {
       return false;
     }
 
-    if (!m_server_socket->bind_and_listen()) {
+    if (!m_server_socket->bind()) {
       deinitialize();
       return false;
     }
@@ -703,22 +703,15 @@ namespace netpp {
   void UDP_Server::receive_on_sockets() {
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
-    for (auto& socket : m_client_sockets) {
-      ISocketPipe* pipe = socket.second.m_pipe;
-      if (pipe->is_busy(EPipeOperation::E_RECV)) {
-        continue;
-      }
+    EIOState state = m_server_socket->recv(0, nullptr, nullptr);
+    if (state == EIOState::E_BUSY) {
+      m_server_socket->error(ESocketErrorReason::E_REASON_RECV);
+      return;
+    }
 
-      EIOState state = pipe->recv(0, nullptr, nullptr);
-      if (state == EIOState::E_BUSY) {
-        pipe->error(ESocketErrorReason::E_REASON_RECV);
-        continue;
-      }
-
-      if (state == EIOState::E_ERROR) {
-        pipe->error(ESocketErrorReason::E_REASON_RECV);
-        continue;
-      }
+    if (state == EIOState::E_ERROR) {
+      m_server_socket->error(ESocketErrorReason::E_REASON_RECV);
+      return;
     }
   }
 
@@ -744,48 +737,6 @@ namespace netpp {
   }
 
   uint64_t UDP_Server::server_accept_thread(void* param) {
-    UDP_Server* server = (UDP_Server*)param;
-
-    SOCKADDR_STORAGE from;
-    ZeroMemory(&from, sizeof(from));
-
-    while (server->is_running()) {
-      bool success = server->m_server_socket->accept(nullptr, [server](uint64_t socket) {
-        std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
-
-        ISecurityController* controller = nullptr;
-        if (server->m_security) {
-          controller = server->m_security->create_controller();
-        }
-
-        ISocketPipe* client_pipe = new UDP_Socket(
-          server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, controller, ESocketHint::E_SERVER);
-
-        client_pipe->open(socket);
-        client_pipe->clone_callbacks_from(server->m_server_socket);
-
-        if (server->m_security) {
-          server->m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
-
-          controller->set_accept_state();
-          client_pipe->proc_pending_auth(EPipeOperation::E_NONE, 0);
-          //{
-          //  TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
-          //  {
-          //    SocketLock l = proxy->acquire_lock();
-          //    proxy->set_accept_state();
-          //  }
-          //  proxy->proc_pending_auth(EPipeOperation::E_NONE, 0);
-          //}
-        }
-        else {
-          server->m_client_sockets[socket] = SocketProcData(client_pipe);
-        }
-
-        return true;
-        });
-    }
-
     return 0;
   }
 
@@ -833,6 +784,17 @@ namespace netpp {
       std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+        if (!pipe) {
+          // We need to establish a logical "connection" here.
+
+          ISecurityController* controller = nullptr;
+          if (server->m_security) {
+            controller = server->m_security->create_controller();
+          }
+
+          server->m_client_sockets[0] = new UDP_Socket(server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, controller, ESocketHint::E_SERVER);
+        }
+
         bool is_disconnect = info.m_bytes_transferred == 0;
         if (is_disconnect) {
           pipe->close();

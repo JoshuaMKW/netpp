@@ -287,7 +287,12 @@ namespace netpp {
       return false;
     }
 
-    if (!m_server_socket->bind_and_listen()) {
+    if (!m_server_socket->bind()) {
+      deinitialize();
+      return false;
+    }
+
+    if (!m_server_socket->listen()) {
       deinitialize();
       return false;
     }
