@@ -38,7 +38,7 @@ add_library(netpp STATIC
     udp/socket.cpp
     udp/client.cpp
     udp/server.cpp
- "http/router.h" "http/router.cpp" "sockenum.h" "dtls/security.cpp" "dtls/security.h" "dtls/dtls_bio.h" "dtls/dtls_bio.cpp" "dtls/cookie.h")
+ "http/router.h" "http/router.cpp" "sockenum.h" "dtls/security.cpp" "dtls/security.h" "dtls/dtls_bio.h" "dtls/dtls_bio.cpp" "dtls/cookie.h" "dns/request.cpp" "dns/request.h" "dns/response.cpp" "dns/response.h" "dns/record.h" "dns/record.cpp")
 
 # Include directories
 target_include_directories(netpp PRIVATE
