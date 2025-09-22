@@ -112,6 +112,23 @@ enum EDNSQuery_RR_TYPE : uint16_t {
 
 // RFC1035 - 3.2.3
 enum EDNSQuery_RR_QTYPE : uint16_t {
+  TYPE_A = 1,       // Host address
+  TYPE_NS = 2,      // Authoritative Name Server
+  TYPE_MD = 3,      // Mail Destination
+  TYPE_MF = 4,      // Mail Forwarder
+  TYPE_CNAME = 5,   // Canonical Name for Alias
+  TYPE_SOA = 6,     // Marks the Start of a Zone of Authority
+  TYPE_MB = 7,      // Mailbox Domain Name (EXPERIMENTAL)
+  TYPE_MG = 8,      // Mailbox Group Member (EXPERIMENTAL)
+  TYPE_MR = 9,      // Mailbox Rename Domain Name (EXPERIMENTAL)
+  TYPE_NULL = 10,   // NULL RR (EXPERIMENTAL)
+  TYPE_WKS = 11,    // Well Known Service Description
+  TYPE_PTR = 12,    // Reverse-lookup
+  TYPE_HINFO = 13,  // Host Information
+  TYPE_MINFO = 14,  // Mailbox or List Information
+  TYPE_MX = 15,     // Mail Exchange
+  TYPE_TXT = 16,    // Text Strings
+
   QTYPE_IXFR = 251,  // Incremental Zone Transfer
   QTYPE_AXFR = 252,  // Standard Zone Transfer
   QTYPE_MAILB = 253, // Request for Mailbox records (MB, MG, or MR)
@@ -129,35 +146,15 @@ enum EDNSQuery_RR_CLASS : uint16_t {
 
 // RFC1035 - 3.2.5
 enum EDNSQuery_RR_QCLASS : uint16_t {
+  CLASS_IN = 1,    // Internet, default
+  CLASS_CS = 2,    // CSNET, (Obsolete - used only for examples in some obsolete RFCs)
+  CLASS_CH = 3,    // CHAOS
+  CLASS_HS = 4,    // Hesiod [Dyer 87]
+
   QCLASS_ALL = 255,  // Any Class
 };
 
-// ------------------------
-// RFC1035 - 3.2.1
-// ------------------------
-struct DNSQuery_RRPartial {
-  EDNSQuery_RR_TYPE m_type;
-  EDNSQuery_RR_CLASS m_class;
-  uint32_t m_ttl;
-  uint16_t m_rdlength;
-};
-
-struct DNSQuery_RR {};
-
 struct DNSQuery_RDATA {};
-
-static DNSQuery_RRPartial* DNSQuery_RR_GetPartial(DNSQuery_RR* rr) {
-  return (DNSQuery_RRPartial*)
-    ((uint8_t*)rr + DNSQuery_GetDomainNameLength((uint8_t*)rr, 256));
-}
-
-static std::string DNSQuery_RR_GetNAME(DNSQuery_RR* rr) {
-  return DNSQuery_GetDomainName((uint8_t*)rr, 256);
-}
-
-static DNSQuery_RDATA* DNSQuery_RR_GetRDATA(DNSQuery_RR* rr) {
-  return (DNSQuery_RDATA*)((uint8_t*)DNSQuery_RR_GetPartial(rr) + 10);
-}
 
 static std::string DNSQuery_RDATA_GetCNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
   return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
@@ -319,15 +316,6 @@ static bool DNSQuery_RDATA_GetWKS_BIT(DNSQuery_RDATA* rdata, uint16_t rlen, uint
 
 // ------------------------
 
-struct DNSQuery_MessageHeader {
-  uint16_t m_transaction_id;
-  uint16_t m_flags;
-  uint16_t m_question_resource_record_count;
-  uint16_t m_answer_resource_record_count;
-  uint16_t m_authority_resource_record_count;
-  uint16_t m_additional_resource_record_count;
-};
-
 enum class EDNSQuery_TransactionType {
 
 };
@@ -338,9 +326,14 @@ enum class EDNSQuery_OperationCode {
 
 enum class EDNSQuery_ReturnCode {
   RETURN_SUCCESS = 0,
+  RETURN_FORMAT_ERROR = 1,
+  RETURN_SERVER_FAILURE = 2,
   RETURN_NAME_ERROR = 3,
+  RETURN_NOT_IMPLEMENTED = 4,
+  RETURN_REFUSED = 5,
 };
 
+// RFC1035 - 4.1.1
 #define FLAG_REQUEST_RESPONSE_MASK 0x8000
 #define FLAG_OPERATION_CODE_MASK 0x7800
 #define FLAG_AUTHORITATIVE_MASK 0x0400
@@ -358,6 +351,74 @@ enum class EDNSQuery_ReturnCode {
 #define FLAGS_GET_RECURSION_AVAILABLE(flags) ((bool)((flags & FLAG_RECURSION_AVAILABLE_MASK) >> 7))
 #define FLAGS_GET_RESERVED(flags) (flags & FLAG_RESERVED_MASK) >> 4)
 #define FLAGS_GET_RETURN_CODE(flags) ((EDNSQuery_ReturnCode)((flags & FLAG_RETURN_CODE_MASK) >> 0))
+
+struct DNSQuery_MessageHeader {
+  uint16_t m_id;
+  uint16_t m_flags;
+  uint16_t m_qdcount;
+  uint16_t m_ancount;
+  uint16_t m_nscount;
+  uint16_t m_arcount;
+};
+// ---------------------
+
+// RFC 1035 - 4.1.2
+struct DNSQuery_QuestionSection {};
+
+static std::string DNSQuery_Question_GetQNAME(DNSQuery_QuestionSection* q) {
+  return DNSQuery_GetDomainName((uint8_t*)q, DNS_NAME_OCTET_LIMIT);
+}
+
+static EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(DNSQuery_QuestionSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return (EDNSQuery_RR_QTYPE)(*(uint16_t*)(qinfo + qname_len));
+}
+
+static EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(DNSQuery_QuestionSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return (EDNSQuery_RR_QCLASS)(*(uint16_t*)(qinfo + qname_len + 2));
+}
+// ------------------
+
+// RFC 1035 - 4.1.3
+struct DNSQuery_ResourceRecordSection {};
+
+static std::string DNSQuery_ResourceRecord_GetQNAME(DNSQuery_ResourceRecordSection* q) {
+  return DNSQuery_GetDomainName((uint8_t*)q, DNS_NAME_OCTET_LIMIT);
+}
+
+static EDNSQuery_RR_TYPE DNSQuery_ResourceRecord_GetTYPE(DNSQuery_ResourceRecordSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return (EDNSQuery_RR_TYPE)(*(uint16_t*)(qinfo + qname_len));
+}
+
+static EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(DNSQuery_ResourceRecordSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return (EDNSQuery_RR_CLASS)(*(uint16_t*)(qinfo + qname_len + 2));
+}
+
+static uint32_t DNSQuery_ResourceRecord_GetTTL(DNSQuery_ResourceRecordSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return *(uint32_t*)(qinfo + qname_len + 4);
+}
+
+static uint16_t DNSQuery_ResourceRecord_GetRDLENGTH(DNSQuery_ResourceRecordSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return *(uint16_t*)(qinfo + qname_len + 8);
+}
+
+static DNSQuery_RDATA* DNSQuery_ResourceRecord_GetRDATA(DNSQuery_ResourceRecordSection* q) {
+  uint8_t* qinfo = (uint8_t*)q;
+  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  return (DNSQuery_RDATA*)(qinfo + qname_len + 10);
+}
+// ----------------
 
 #if 0
 
