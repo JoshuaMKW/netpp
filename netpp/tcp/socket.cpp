@@ -313,7 +313,7 @@ namespace netpp {
   {
     if (!m_security) {
       *out_data = new char[in_size];
-      memcpy_s(out_data, in_size, in_data, in_size);
+      memcpy_s(*out_data, in_size, in_data, in_size);
       return in_size;
     }
 

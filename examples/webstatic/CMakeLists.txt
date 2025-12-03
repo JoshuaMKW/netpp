@@ -7,6 +7,8 @@ project(Webstatic VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+find_package(OpenSSL REQUIRED)
+
 # Define the executable
 add_executable(Webstatic "server.cpp")
 
@@ -17,6 +19,9 @@ target_include_directories(Webstatic PRIVATE
 )
 
 target_link_directories(Webstatic PRIVATE ${CMAKE_BINARY_DIR}/Application)
+
+target_link_libraries(Webstatic PRIVATE OpenSSL::SSL)
+target_link_libraries(Webstatic PRIVATE OpenSSL::Crypto)
 
 # Link libraries
 target_link_libraries(Webstatic PRIVATE

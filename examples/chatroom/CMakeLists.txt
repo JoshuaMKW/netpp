@@ -7,6 +7,8 @@ project(Chatroom VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+find_package(OpenSSL REQUIRED)
+
 # ----------------
 # ChatServer
 # ----------------
@@ -23,6 +25,9 @@ target_include_directories(ChatServer PRIVATE
 )
 
 target_link_directories(ChatServer PRIVATE ${CMAKE_BINARY_DIR}/Application)
+
+target_link_libraries(ChatServer PRIVATE OpenSSL::SSL)
+target_link_libraries(ChatServer PRIVATE OpenSSL::Crypto)
 
 # Link libraries
 target_link_libraries(ChatServer PRIVATE
@@ -63,6 +68,9 @@ target_include_directories(ChatClient PRIVATE
 )
 
 target_link_directories(ChatClient PRIVATE ${CMAKE_BINARY_DIR}/Application)
+
+target_link_libraries(ChatClient PRIVATE OpenSSL::SSL)
+target_link_libraries(ChatClient PRIVATE OpenSSL::Crypto)
 
 # Link libraries
 target_link_libraries(ChatClient PRIVATE

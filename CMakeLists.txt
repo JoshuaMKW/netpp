@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.14)
 # Root project name
 project(netpp_project VERSION 1.0 LANGUAGES CXX)
 
+find_package(OpenSSL REQUIRED)
+
 # Set the C++ standard
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
