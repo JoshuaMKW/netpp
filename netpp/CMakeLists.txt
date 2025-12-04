@@ -41,10 +41,8 @@ add_library(netpp STATIC
  "http/router.h" "http/router.cpp" "sockenum.h" "dtls/security.cpp" "dtls/security.h" "dtls/dtls_bio.h" "dtls/dtls_bio.cpp" "dtls/cookie.h" "security.cpp")
 
 # Include directories
-target_include_directories(netpp PRIVATE
-    ${CMAKE_SOURCE_DIR}/netpp
-    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
-)
+target_include_directories(netpp PRIVATE ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include)
+target_include_directories(netpp PUBLIC ${CMAKE_SOURCE_DIR}/netpp)
 
 # Link libraries
 target_link_libraries(netpp PRIVATE
