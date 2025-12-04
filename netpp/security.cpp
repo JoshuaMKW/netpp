@@ -118,6 +118,47 @@ static bool generate_client_key_rsa(
   return true;
 }
 
+#ifdef _WIN32
+
+#include <wincrypt.h>
+
+#pragma comment(lib, "Crypt32.lib")
+
+static bool add_windows_root_certs(SSL_CTX* ctx) {
+  X509_STORE* store = SSL_CTX_get_cert_store(ctx);
+
+  // Open the Windows "ROOT" system store
+  HCERTSTORE hStore = CertOpenSystemStore(0, "ROOT");
+  if (!hStore)
+    return false;
+
+  PCCERT_CONTEXT pContext = NULL;
+
+  // Iterate over every certificate in the Windows store
+  while ((pContext = CertEnumCertificatesInStore(hStore, pContext))) {
+    // Windows gives us the certificate as a binary DER blob
+    const unsigned char* der_data = pContext->pbCertEncoded;
+    long der_len = pContext->cbCertEncoded;
+
+    // Convert DER blob to OpenSSL X509 structure
+    // Note: d2i_X509 moves the pointer, so we pass a temporary copy
+    const unsigned char* p = der_data;
+    X509* x509 = d2i_X509(NULL, &p, der_len);
+
+    if (x509) {
+      // Add to OpenSSL store
+      X509_STORE_add_cert(store, x509);
+      X509_free(x509); // OpenSSL increments the ref count, so we free our copy
+    }
+  }
+
+  CertFreeCertificateContext(pContext);
+  CertCloseStore(hStore, 0);
+
+  return true;
+}
+#endif
+
 namespace netpp {
 
   bool generate_client_key_rsa_2048(
@@ -138,6 +179,17 @@ namespace netpp {
     const std::string& cn,
     const std::string& password) {
     return generate_client_key_rsa(key_file, csr_file, country, organization, cn, password, 4096);
+  }
+
+  bool load_system_cacerts(SSL_CTX* ctx) {
+#ifdef _WIN32
+    return add_windows_root_certs(ctx);
+#else
+    if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+      return false;
+    }
+    return true;
+#endif
   }
 
 }

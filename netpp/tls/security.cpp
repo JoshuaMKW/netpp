@@ -101,19 +101,34 @@ namespace netpp {
     if (m_factory->is_server()) {
       SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
 
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, ca_file.c_str(), NULL) < 1) {
-        ERR_print_errors_fp(stderr);
-        SSL_CTX_free(m_tls_ctx);
-        m_tls_ctx = nullptr;
-        return false;
+      if (!ca_file.empty()) {
+        if (SSL_CTX_load_verify_locations(m_tls_ctx, ca_file.c_str(), NULL) < 1) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
+      } else {
+        if (!load_system_cacerts(m_tls_ctx)) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
       }
-    }
-    else {
+    } else {
       SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
 
       // Load the server's certificate as a trusted CA
       if (!cert_file.empty()) {
         if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
+      } else {
+        if (!load_system_cacerts(m_tls_ctx)) {
           ERR_print_errors_fp(stderr);
           SSL_CTX_free(m_tls_ctx);
           m_tls_ctx = nullptr;

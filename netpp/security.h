@@ -6,6 +6,8 @@
 
 #include "netpp/sockenum.h"
 
+#include <openssl/ssl.h>
+
 namespace netpp {
 
   class ISocketPipe;
@@ -102,5 +104,7 @@ namespace netpp {
     const std::string& organization,
     const std::string& cn = "",
     const std::string& password = "");
+
+  bool load_system_cacerts(SSL_CTX* ctx);
 
 }
