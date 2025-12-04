@@ -3,8 +3,8 @@
 #include <functional>
 #include <string>
 
-#include "request.h"
-#include "response.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
 
 namespace netpp {
 

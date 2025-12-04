@@ -2,10 +2,10 @@
 #include <iostream>
 #include <thread>
 
-#include "network.h"
-#include "socket.h"
+#include "netpp/network.h"
+#include "netpp/socket.h"
 
-#include "server.h"
+#include "netpp/server.h"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -322,7 +322,7 @@ namespace netpp {
       return -1;
     }
 
-    return m_security->decrypt(in_data, (int32_t)in_size, out_data);
+    return (int32_t)m_security->decrypt(in_data, (size_t)in_size, out_data);
   }
 
 }  // namespace netpp

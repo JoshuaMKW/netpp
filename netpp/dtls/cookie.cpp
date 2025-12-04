@@ -1,5 +1,4 @@
-#include "cookie.h"
-#include "cookie.h"
+#include "netpp/dtls/cookie.h"
 
 #include <random>
 #include <stddef.h>

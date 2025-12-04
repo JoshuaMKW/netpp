@@ -1,7 +1,7 @@
-#include "protocol.h"
-#include "http/request.h"
-#include "http/response.h"
-#include "socket.h"
+#include "netpp/protocol.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
+#include "netpp/socket.h"
 
 namespace netpp {
 

@@ -1,5 +1,5 @@
-#include "../client.h"
-#include "../protocol.h"
+#include "netpp/client.h"
+#include "netpp/protocol.h"
 
 #include <cassert>
 #include <chrono>
