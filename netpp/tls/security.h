@@ -2,9 +2,9 @@
 
 #include <openssl/ssl.h>
 
-#include "netpp.h"
-#include "security.h"
-#include "socket.h"
+#include "netpp/tls/netpp.h"
+#include "netpp/tls/security.h"
+#include "netpp/tls/socket.h"
 
 namespace netpp {
 
