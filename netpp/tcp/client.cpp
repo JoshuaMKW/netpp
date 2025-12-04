@@ -535,6 +535,12 @@ namespace netpp {
       return true;
     }
 
+    m_handshake_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
+    if (m_handshake_state == EAuthState::E_FAILED) {
+      pipe->error(ESocketErrorReason::E_REASON_CONNECT);
+      return false;
+    }
+
     if (m_handshake_state == EAuthState::E_AUTHENTICATED) {
 #if WANTS_EXPLICIT_AUTH_SYNC
       if (info.m_operation != EPipeOperation::E_RECV) {
@@ -561,11 +567,6 @@ namespace netpp {
       return true;
     }
 
-    m_handshake_state = pipe->proc_pending_auth(info.m_operation, info.m_bytes_transferred);
-    if (m_handshake_state == EAuthState::E_FAILED) {
-      pipe->error(ESocketErrorReason::E_REASON_CONNECT);
-      return false;
-    }
     return true;
   }
 
