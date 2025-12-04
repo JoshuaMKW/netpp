@@ -284,8 +284,6 @@ namespace netpp {
   }
 
   void TCP_Client::deinitialize() {
-    std::unique_lock<std::mutex> lock(m_mutex);
-
     if (m_connect_thread.joinable()) {
       m_connect_thread.join();
     }
