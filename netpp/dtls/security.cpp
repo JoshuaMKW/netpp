@@ -5,8 +5,8 @@
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 
-#include "dtls/cookie.h"
-#include "dtls/security.h"
+#include "netpp/dtls/cookie.h"
+#include "netpp/dtls/security.h"
 
 static int DTLS_CookieGenerateCallback(SSL* ssl_ctx, unsigned char* cookie, unsigned int* cookie_len) {
   // TODO: Snag peer information for cookie generation.
