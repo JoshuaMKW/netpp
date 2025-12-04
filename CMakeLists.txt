@@ -14,3 +14,5 @@ set(NETPP_SKIP_TLS_CERT_VERIFY False CACHE BOOL "Setting this to true makes it s
 # Add subdirectories for subprojects
 add_subdirectory(netpp)
 add_subdirectory(examples)
+
+target_include_directories(netpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

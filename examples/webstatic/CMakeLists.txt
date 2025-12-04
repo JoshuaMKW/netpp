@@ -14,8 +14,8 @@ add_executable(Webstatic "server.cpp")
 
 # Include directories
 target_include_directories(Webstatic PRIVATE
-    ${CMAKE_SOURCE_DIR}/netpp
-    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
+    ${CMAKE_CURRENT_SOURCE_DIR}../../netpp
+    ${CMAKE_CURRENT_SOURCE_DIR}../../vcpkg_installed/x64-windows/include
 )
 
 target_link_directories(Webstatic PRIVATE ${CMAKE_BINARY_DIR}/Application)

@@ -63,8 +63,8 @@ add_executable(ChatClient
 
 # Include directories
 target_include_directories(ChatClient PRIVATE
-    ${CMAKE_SOURCE_DIR}/netpp
-    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
+    ${CMAKE_CURRENT_SOURCE_DIR}../../netpp
+    ${CMAKE_CURRENT_SOURCE_DIR}../../vcpkg_installed/x64-windows/include
 )
 
 target_link_directories(ChatClient PRIVATE ${CMAKE_BINARY_DIR}/Application)

@@ -11,12 +11,10 @@
 #define SERVER_CERT "./cert/localhost.crt"
 #define SERVER_KEY "./cert/localhost.key"
 #define SERVER_CACERT "./cert/rootCA.pem"
-#define SERVER_CERT_PASSWD ""
+#define SERVER_CERT_PASSWD "password"
 #else
 #define SERVER_CERT nullptr
 #define SERVER_KEY nullptr
 #define SERVER_CACERT nullptr
 #define SERVER_CERT_PASSWD nullptr
 #endif
-
-#define SERVER_CERT_PASSWD "password"
