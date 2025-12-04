@@ -4,7 +4,6 @@
 
 #include "netpp/netpp.h"
 #include "netpp/socket.h"
-#include "netpp/dtls/security.h"
 
 namespace netpp {
 

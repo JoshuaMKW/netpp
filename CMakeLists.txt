@@ -18,5 +18,4 @@ add_subdirectory(netpp)
 add_subdirectory(examples)
 
 target_include_directories(netpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-# message (STATUS "Include directories: ${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(netpp PUBLIC ${OPENSSL_INCLUDE_DIR})

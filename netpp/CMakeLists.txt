@@ -77,8 +77,8 @@ endif()
 
 # Add preprocessor definitions
 target_compile_definitions(netpp PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN>
 )
 
 if (NETPP_SKIP_TLS_CERT_VERIFY)
