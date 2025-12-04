@@ -75,8 +75,21 @@ int main(int argc, char** argv) {
   std::getline(std::cin, client_name);
 
 #if SERVER_USE_TLS
+  if (!std::filesystem::exists(SERVER_CERT) && !std::filesystem::exists(SERVER_KEY)) {
+    std::filesystem::create_directories(std::filesystem::path(SERVER_CERT).parent_path());
+    std::filesystem::create_directories(std::filesystem::path(SERVER_KEY).parent_path());
+    if (!netpp::generate_client_key_rsa_2048(
+      SERVER_KEY,
+      SERVER_CERT,
+      "US",
+      "NetPP Chatroom")) {
+      fprintf(stderr, "Failed to generate self-signed certificate\n");
+      return 1;
+    }
+  }
+
   TLSSecurityFactory* security
-    = new TLSSecurityFactory(false, SERVER_KEY, SERVER_CERT, "", "localhost", "", ETLSVerifyFlags::VERIFY_PEER);
+    = new TLSSecurityFactory(false, SERVER_KEY, "", "", "localhost", "", ETLSVerifyFlags::VERIFY_PEER);
 #else
   TLSSecurityFactory* security = nullptr;
 #endif

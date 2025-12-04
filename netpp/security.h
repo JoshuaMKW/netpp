@@ -87,4 +87,20 @@ namespace netpp {
     virtual const std::string& password() const = 0;
   };
 
+  bool generate_client_key_rsa_2048(
+    const std::filesystem::path& key_file,
+    const std::filesystem::path& csr_file,
+    const std::string& country,
+    const std::string& organization,
+    const std::string& cn = "",
+    const std::string& password = "");
+
+  bool generate_client_key_rsa_4096(
+    const std::filesystem::path& key_file,
+    const std::filesystem::path& csr_file,
+    const std::string& country,
+    const std::string& organization,
+    const std::string& cn = "",
+    const std::string& password = "");
+
 }

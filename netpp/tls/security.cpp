@@ -69,29 +69,33 @@ namespace netpp {
       return false;
     }
 
-    if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
+    if (!cert_file.empty()) {
+      if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return false;
+      }
     }
 
     if (!passwd.empty()) {
       SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd.c_str());
     }
 
-    if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
-    }
+    if (!cert_file.empty()) {
+      if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return false;
+      }
 
-    if (SSL_CTX_check_private_key(m_tls_ctx) == 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
+      if (SSL_CTX_check_private_key(m_tls_ctx) == 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return false;
+      }
     }
 
     if (m_factory->is_server()) {
@@ -108,11 +112,13 @@ namespace netpp {
       SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
 
       // Load the server's certificate as a trusted CA
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
-        ERR_print_errors_fp(stderr);
-        SSL_CTX_free(m_tls_ctx);
-        m_tls_ctx = nullptr;
-        return false;
+      if (!cert_file.empty()) {
+        if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
       }
 
       if (auto* ca_list = SSL_load_client_CA_file(ca_file.c_str())) {
