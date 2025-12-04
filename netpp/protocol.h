@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "netpp.h"
-#include "network.h"
-#include "security.h"
+#include "netpp/netpp.h"
+#include "netpp/network.h"
+#include "netpp/security.h"
 
 struct sockaddr;
 

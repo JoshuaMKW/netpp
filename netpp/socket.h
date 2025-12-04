@@ -15,14 +15,14 @@
 #include <sys/socket.h>
 #endif
 
-#include "netpp.h"
-#include "allocator.h"
-#include "network.h"
-#include "protocol.h"
-#include "security.h"
-#include "http/request.h"
-#include "http/response.h"
-#include "platform/socket.h"
+#include "netpp/netpp.h"
+#include "netpp/allocator.h"
+#include "netpp/network.h"
+#include "netpp/protocol.h"
+#include "netpp/security.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
+#include "netpp/platform/socket.h"
 
 namespace netpp {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "netpp.h"
+#include "netpp/netpp.h"
 
 namespace netpp {
 

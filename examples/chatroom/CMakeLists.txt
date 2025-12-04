@@ -37,8 +37,8 @@ target_link_libraries(ChatServer PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(ChatServer PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_STATIC>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
 )
 
 # Set output directories
@@ -80,8 +80,8 @@ target_link_libraries(ChatClient PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(ChatClient PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_STATIC>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
 )
 
 # Set output directories

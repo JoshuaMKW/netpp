@@ -815,7 +815,7 @@ namespace netpp {
 
       using namespace std::chrono;
 
-      int32_t sent_size = 0;
+      uint32_t sent_size = 0;
 
       while (sent_size < size) {
         int32_t chunk_size = min(size - sent_size, send_buf_size());
@@ -850,12 +850,12 @@ namespace netpp {
       }
 
       if (m_send_buffer->State == EIOState::E_ASYNC) {
-        return sent_size;
+        return (int32_t)sent_size;
       }
 
       m_send_buffer->State = EIOState::E_COMPLETE;
       m_send_buffer->IsBusy = FALSE;
-      return sent_size;
+      return (int32_t)sent_size;
 #else
         switch (m_protocol) {
         case ETransportLayerProtocol::E_TCP: {
@@ -891,66 +891,66 @@ namespace netpp {
 #endif
     }
 
-      char* recv_buf() const override {
-        return (char*)m_recv_allocator->ptr(m_recv_buf_block);
+    char* recv_buf() const override {
+      return (char*)m_recv_allocator->ptr(m_recv_buf_block);
+    }
+
+    uint32_t recv_buf_size() const override {
+      return m_recv_allocator->block_size();
+    }
+
+    char* send_buf() const override {
+      return (char*)m_send_allocator->ptr(m_send_buf_block);
+    }
+
+    uint32_t send_buf_size() const override {
+      return m_send_allocator->block_size();
+    }
+
+    void set_recv_buf(char* buf) override {}
+    void set_recv_buf_size(uint32_t size) override {}
+    void set_send_buf(const char* buf) override {}
+    void set_send_buf_size(uint32_t size) override {}
+
+    int64_t get_transferred(EPipeOperation op) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        return m_recv_transferred;
+      case EPipeOperation::E_SEND:
+        return m_send_transferred;
+      default:
+        return 0;
       }
+    }
 
-      uint32_t recv_buf_size() const override {
-        return m_recv_allocator->block_size();
+    void set_transferred(EPipeOperation op, int64_t transferred) {
+      switch (op) {
+      case EPipeOperation::E_RECV:
+        m_recv_transferred = (uint32_t)transferred;
+        break;
+      case EPipeOperation::E_SEND:
+        m_send_transferred = (uint32_t)transferred;
+        break;
+      default:
+        break;
       }
+    }
 
-      char* send_buf() const override {
-        return (char*)m_send_allocator->ptr(m_send_buf_block);
-      }
+    ISocketIOResult* wait_results() override {
+      return new Win32ClientSocketIOResult(this, m_recv_overlapped, m_send_overlapped);
+    }
 
-      uint32_t send_buf_size() const override {
-        return m_send_allocator->block_size();
-      }
+    void* sys_data() const override { return m_iocp; }
+    void* user_data() const override { return m_user_data; }
 
-      void set_recv_buf(char* buf) override {}
-      void set_recv_buf_size(uint32_t size) override {}
-      void set_send_buf(const char* buf) override {}
-      void set_send_buf_size(uint32_t size) override {}
+    void on_close(close_cb cb) { m_on_close = cb; }
+    void on_error(error_cb cb) { m_on_error = cb; }
 
-      int64_t get_transferred(EPipeOperation op) {
-        switch (op) {
-        case EPipeOperation::E_RECV:
-          return m_recv_transferred;
-        case EPipeOperation::E_SEND:
-          return m_send_transferred;
-        default:
-          return 0;
-        }
-      }
-
-      void set_transferred(EPipeOperation op, int64_t transferred) {
-        switch (op) {
-        case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
-          break;
-        case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
-          break;
-        default:
-          break;
-        }
-      }
-
-      ISocketIOResult* wait_results() override {
-        return new Win32ClientSocketIOResult(this, m_recv_overlapped, m_send_overlapped);
-      }
-
-      void* sys_data() const override { return m_iocp; }
-      void* user_data() const override { return m_user_data; }
-
-      void on_close(close_cb cb) { m_on_close = cb; }
-      void on_error(error_cb cb) { m_on_error = cb; }
-
-      void clone_callbacks_from(ISocketOSSupportLayer* other) {
-        Win32ClientSocketLayer* tcp = static_cast<Win32ClientSocketLayer*>(other);
-        m_on_close = tcp->m_on_close;
-        m_on_error = tcp->m_on_error;
-      }
+    void clone_callbacks_from(ISocketOSSupportLayer* other) {
+      Win32ClientSocketLayer* tcp = static_cast<Win32ClientSocketLayer*>(other);
+      m_on_close = tcp->m_on_close;
+      m_on_error = tcp->m_on_error;
+    }
 
   private:
     std::string m_host_name;
@@ -1485,7 +1485,7 @@ namespace netpp {
 
         char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
         uint32_t block_size = m_send_allocator->block_size();
-        int32_t bytes_sent = 0;
+        uint32_t bytes_sent = 0;
 
         uint32_t flags_ = flags ? *flags : 0;
         flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
@@ -1509,11 +1509,11 @@ namespace netpp {
           }
 
           m_send_buffer->State = EIOState::E_PARTIAL;
-          return bytes_sent;
+          return (int32_t)bytes_sent;
         }
 
         m_send_buffer->State = EIOState::E_COMPLETE;
-        return bytes_sent;
+        return (int32_t)bytes_sent;
       }
 
       char* recv_buf() const override {
@@ -1551,10 +1551,10 @@ namespace netpp {
       void set_transferred(EPipeOperation op, int64_t transferred) {
         switch (op) {
         case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
+          m_recv_transferred = (uint32_t)transferred;
           break;
         case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
+          m_send_transferred = (uint32_t)transferred;
           break;
         default:
           break;

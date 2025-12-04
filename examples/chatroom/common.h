@@ -2,7 +2,7 @@
 
 #include "network.h"
 
-#define SERVER_IPV4 network_ipv4()
+#define SERVER_IPV4 host_ipv4()
 #define SERVER_PORT "8080"
 
 #define SERVER_USE_TLS true

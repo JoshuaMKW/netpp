@@ -1,5 +1,5 @@
-#include "client.h"
-#include "protocol.h"
+#include "../client.h"
+#include "../protocol.h"
 
 #include <cassert>
 #include <chrono>

@@ -195,7 +195,6 @@ namespace netpp {
     int32_t transferring = 0;
 
     while (proc_state == EProcState::E_READY) {
-    update_handshake:
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully
@@ -275,7 +274,7 @@ namespace netpp {
       return -1;
     }
 
-    if (BIO_write(m_in_bio, data, size) != size) {
+    if (BIO_write(m_in_bio, data, (int)size) != size) {
       return -1;
     }
 
@@ -315,7 +314,7 @@ namespace netpp {
       return -1;
     }
 
-    int processed = SSL_write(m_ssl, data, size);
+    int processed = SSL_write(m_ssl, data, (int)size);
     if (processed <= 0) {
       unsigned long err = ERR_get_error();
       if (err == 0) {
@@ -327,7 +326,7 @@ namespace netpp {
       return -1;
     }
 
-    int written = BIO_ctrl_pending(m_out_bio);
+    int written = (int)BIO_ctrl_pending(m_out_bio);
     *encrypt_out = new char[written];
 
     int bytes = BIO_read(m_out_bio, *encrypt_out, written);
@@ -344,8 +343,8 @@ namespace netpp {
     uint32_t send_buf_size = pipe->get_os_layer()->send_buf_size();
     char* tls_out = new char[send_buf_size];
 
-    int pending = BIO_ctrl_pending(m_out_bio);
-    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, send_buf_size));
+    int pending = (int)BIO_ctrl_pending(m_out_bio);
+    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, (int)send_buf_size));
     if (bytes_to_send > 0) {
       if (pipe->is_busy(EPipeOperation::E_SEND)) {
         return EProcState::E_WAITING;

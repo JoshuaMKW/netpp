@@ -26,8 +26,8 @@ target_link_libraries(Appsync PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(Appsync PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_STATIC>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
 )
 
 # Set output directories

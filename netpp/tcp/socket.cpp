@@ -202,7 +202,7 @@ namespace netpp {
         return EIOState::E_BUSY;
       }
 
-      int32_t transferred = m_socket_layer->send(data_ptr, data_size, flags);
+      int32_t transferred = m_socket_layer->send(data_ptr, (uint32_t)data_size, flags);
       EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
 
       switch (state) {
@@ -230,7 +230,7 @@ namespace netpp {
       }
     }
 
-    int32_t transferred = m_socket_layer->send(data_ptr, data_size, flags);
+    int32_t transferred = m_socket_layer->send(data_ptr, (uint32_t)data_size, flags);
     EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
 
     switch (state) {
@@ -322,7 +322,7 @@ namespace netpp {
       return -1;
     }
 
-    return m_security->decrypt(in_data, in_size, out_data);
+    return m_security->decrypt(in_data, (int32_t)in_size, out_data);
   }
 
 }  // namespace netpp

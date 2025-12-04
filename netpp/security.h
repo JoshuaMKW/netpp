@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-#include "sockenum.h"
+#include "netpp/sockenum.h"
 
 namespace netpp {
 

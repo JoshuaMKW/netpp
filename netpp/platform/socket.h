@@ -15,17 +15,17 @@
 #include <sys/socket.h>
 #endif
 
-#include "netpp.h"
-#include "allocator.h"
-#include "network.h"
-#include "protocol.h"
-#include "sockenum.h"
-#include "http/request.h"
-#include "http/response.h"
+#include "netpp/netpp.h"
+#include "netpp/allocator.h"
+#include "netpp/network.h"
+#include "netpp/protocol.h"
+#include "netpp/sockenum.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
 
 namespace netpp {
 
-    class DNS_Request;
+  class DNS_Request;
   class DNS_Response;
   class HTTP_Request;
   class HTTP_Response;
