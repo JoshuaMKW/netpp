@@ -279,6 +279,8 @@ namespace netpp {
     return m_handshake_state;
   }
 
+  static size_t calculate_size_from_tls_record_vector(const char* data, size_t size);
+
   int64_t TLSSecurityController::decrypt(const char* data, size_t size, char** decrypt_out)
   {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
@@ -293,21 +295,15 @@ namespace netpp {
       return -1;
     }
 
-    // Get the expected TLS Record size...
-    uint16_t tls_rec_size;
-    *((uint8_t*)(&tls_rec_size) + 0) = data[4];
-    *((uint8_t*)(&tls_rec_size) + 1) = data[3];
+    // There may be multiple concatenated records
+    // ---
 
-    // If this is the case, the TLS Record
-    // has not been fully received yet and
-    // we should wait for more data...
-    if (size < tls_rec_size + 5) {
-      return 0;
-    }
+    // Calculate the worst case size for decrypted data
+    size_t decrypt_size = calculate_size_from_tls_record_vector(data, size);
 
-    *decrypt_out = new char[tls_rec_size];
+    *decrypt_out = new char[decrypt_size];
 
-    int bytes = SSL_read(m_ssl, *decrypt_out, tls_rec_size);
+    int bytes = SSL_read(m_ssl, *decrypt_out, size);
     if (bytes >= 0) {
       return bytes;
     }
@@ -438,4 +434,23 @@ namespace netpp {
   {
   }
 
+  size_t calculate_size_from_tls_record_vector(const char* data, size_t size) {
+    size_t total_size = 0;
+    size_t offset = 0;
+    while (offset + 5 <= size) {
+      // TLS record header is 5 bytes
+      uint8_t content_type = static_cast<uint8_t>(data[offset]);
+      uint16_t version = (static_cast<uint8_t>(data[offset + 1]) << 8) | static_cast<uint8_t>(data[offset + 2]);
+      uint16_t length = (static_cast<uint8_t>(data[offset + 4]) << 8) | static_cast<uint8_t>(data[offset + 3]);
+      // Check if the remaining data is enough for the current record
+      if (offset + 5 + length > size) {
+        break; // Incomplete record
+      }
+      total_size += length;
+      offset += static_cast<size_t>(5 + length); // Move to the next record
+    }
+
+    // Convert this to a worst-case decrypted size estimate
+    return total_size + 2048; // Add some overhead for padding, MAC, etc.
+  }
 }
