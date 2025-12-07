@@ -460,14 +460,15 @@ namespace netpp {
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
-    if (data.m_bytes_total == 0) {
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
       data.m_bytes_total = adapter->calc_size(proc_buf, data.m_bytes_processed);
+      data.m_proc_until_closed = data.m_bytes_total == 0;
     }
 
     // If the adapter is not valid, we need to reset the state
     // and return an error...
     // ---
-    if (data.m_bytes_total == 0) {
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
       data.m_bytes_total = 0;
       data.m_bytes_processed = 0;
@@ -480,9 +481,22 @@ namespace netpp {
     // the total expected data, we go ahead and resize the
     // buffer to be the total bytes for the upcoming reads...
     // ---
-    if (!data.m_proc_buf) {
+    if (data.m_proc_until_closed) {
+      char* new_proc_buf = (char*)realloc(data.m_proc_buf, data.m_bytes_processed + sock_data.m_recv_state.m_bytes_transferred);
+      if (new_proc_buf) {
+        if (!data.m_proc_buf) {
+          memcpy_s(
+            new_proc_buf,
+            data.m_bytes_processed,
+            proc_buf,
+            data.m_bytes_processed
+          );
+        }
+        data.m_proc_buf = new_proc_buf;
+      }
+    } else if (!data.m_proc_buf) {
       if (data.m_bytes_total > info.m_bytes_transferred) {
-        char* new_proc_buf = new char[data.m_bytes_total];
+        char* new_proc_buf = (char*)malloc(data.m_bytes_total);
         memcpy_s(
           new_proc_buf,
           data.m_bytes_processed,
@@ -496,9 +510,10 @@ namespace netpp {
         data.m_proc_buf = proc_buf;
       }
     }
+    
 
     // Initiate the next read...
-    if (data.m_bytes_processed < data.m_bytes_total) {
+    if (data.m_proc_until_closed || data.m_bytes_processed < data.m_bytes_total) {
       uint32_t flags = 0;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;

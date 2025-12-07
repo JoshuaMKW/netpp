@@ -54,7 +54,7 @@ namespace netpp {
     SSL_CTX_set_max_proto_version(m_tls_ctx, TLS1_3_VERSION);
 
     // Set cipher list for TLS 1.2 and below
-    if (!SSL_CTX_set_cipher_list(m_tls_ctx, "ECDHE-RSA-AES128-GCM-SHA256")) {
+    if (!SSL_CTX_set_cipher_list(m_tls_ctx, "HIGH:!aNULL:!MD5")) {
       ERR_print_errors_fp(stderr);
       SSL_CTX_free(m_tls_ctx);
       m_tls_ctx = nullptr;
@@ -149,6 +149,10 @@ namespace netpp {
       return false;
     }
 
+    if (!hostname.empty()) {
+      SSL_set_tlsext_host_name(m_ssl, hostname.c_str());
+    }
+
     m_in_bio = BIO_new(BIO_s_mem());
     BIO_set_nbio(m_in_bio, 1);
     m_out_bio = BIO_new(BIO_s_mem());
@@ -203,11 +207,21 @@ namespace netpp {
     int32_t recv_transferred = last_op == EPipeOperation::E_RECV ? post_transferred : 0;
     int32_t send_transferred = last_op == EPipeOperation::E_SEND ? post_transferred : 0;
 
-    SocketLock l = pipe->acquire_lock();
-
     EProcState proc_state = EProcState::E_READY;
     bool wants_recv = false;
     int32_t transferring = 0;
+
+    SocketLock l = pipe->acquire_lock();
+    
+    // CHANGED: If we just received data, put it into the BIO *before* attempting the handshake
+    if (last_op == EPipeOperation::E_RECV && post_transferred > 0) {
+      char* recv_buf = pipe->get_os_layer()->recv_buf();
+      int written = BIO_write(m_in_bio, recv_buf, post_transferred);
+      if (written <= 0) {
+        // Handle Fatal Error
+        return EAuthState::E_FAILED;
+      }
+    }
 
     while (proc_state == EProcState::E_READY) {
       result = SSL_do_handshake(m_ssl);
@@ -283,36 +297,70 @@ namespace netpp {
 
   int64_t TLSSecurityController::decrypt(const char* data, size_t size, char** decrypt_out)
   {
-    if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
-      return -1;
+    if (m_handshake_state != EAuthState::E_AUTHENTICATED) return -1;
+    // Note: It is valid to call decrypt with size 0 just to flush buffers, 
+    // so we only check data validity if size > 0.
+    if (size > 0 && data == nullptr) return -1;
+    if (decrypt_out == nullptr) return -1;
+
+    // 1. Feed new data into OpenSSL (if any)
+    if (size > 0) {
+      int written = BIO_write(m_in_bio, data, (int)size);
+      if (written <= 0) {
+        return -1; // BIO failure
+      }
     }
 
-    if (data == nullptr || decrypt_out == nullptr || size == 0) {
-      return -1;
+    // 2. Use a vector as a dynamic buffer to accumulate ALL available decrypted data
+    std::vector<char> accumulation_buffer;
+    accumulation_buffer.reserve(16384);
+
+    char temp_buffer[16384]; // 16KB read chunks
+
+    while (true) {
+      int bytes = SSL_read(m_ssl, temp_buffer, sizeof(temp_buffer));
+
+      if (bytes > 0) {
+        // Success: append data to our accumulator
+        accumulation_buffer.insert(accumulation_buffer.end(), temp_buffer, temp_buffer + bytes);
+      }
+      else {
+        int ssl_err = SSL_get_error(m_ssl, bytes);
+
+        // Case A: No more data available right now (Normal Exit)
+        if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+          break;
+        }
+
+        // Case B: Peer closed connection gracefully (EOF)
+        if (ssl_err == SSL_ERROR_ZERO_RETURN) {
+          break;
+        }
+
+        // Case C: Actual Fatal Error
+        unsigned long err = ERR_get_error();
+        // If checking syscall error, sometimes queue is empty, meaning EOF/Connection Reset
+        if (ssl_err == SSL_ERROR_SYSCALL && err == 0) {
+          break; // Treat as dirty EOF
+        }
+
+        fprintf(stderr, "OpenSSL Fatal error: %s\n", ERR_error_string(err, nullptr));
+        return -1;
+      }
     }
 
-    if (BIO_write(m_in_bio, data, (int)size) != size) {
-      return -1;
-    }
+    // 3. Copy accumulated data to the output pointer
+    size_t total_decrypted = accumulation_buffer.size();
 
-    // There may be multiple concatenated records
-    // ---
-
-    // Calculate the worst case size for decrypted data
-    size_t decrypt_size = calculate_size_from_tls_record_vector(data, size);
-
-    *decrypt_out = new char[decrypt_size];
-
-    int bytes = SSL_read(m_ssl, *decrypt_out, size);
-    if (bytes >= 0) {
-      return bytes;
+    if (total_decrypted > 0) {
+      *decrypt_out = new char[total_decrypted];
+      std::memcpy(*decrypt_out, accumulation_buffer.data(), total_decrypted);
     }
     else {
-      unsigned long err = ERR_get_error();
-      fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+      *decrypt_out = nullptr; // Or new char[0] depending on your API needs
     }
 
-    return -1;
+    return (int64_t)total_decrypted;
   }
 
   int64_t TLSSecurityController::encrypt(const char* data, size_t size, char** encrypt_out)
@@ -439,13 +487,16 @@ namespace netpp {
     size_t offset = 0;
     while (offset + 5 <= size) {
       // TLS record header is 5 bytes
-      uint8_t content_type = static_cast<uint8_t>(data[offset]);
-      uint16_t version = (static_cast<uint8_t>(data[offset + 1]) << 8) | static_cast<uint8_t>(data[offset + 2]);
-      uint16_t length = (static_cast<uint8_t>(data[offset + 4]) << 8) | static_cast<uint8_t>(data[offset + 3]);
+      // Byte 0: Content Type
+      // Byte 1-2: Version
+      // Byte 3-4: Length (Big Endian)
+
+      uint16_t length = (static_cast<uint8_t>(data[offset + 3]) << 8) | static_cast<uint8_t>(data[offset + 4]);
       // Check if the remaining data is enough for the current record
       if (offset + 5 + length > size) {
         break; // Incomplete record
       }
+
       total_size += length;
       offset += static_cast<size_t>(5 + length); // Move to the next record
     }

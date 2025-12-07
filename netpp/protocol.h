@@ -45,6 +45,9 @@ namespace netpp {
     virtual ~IApplicationLayerAdapter() = default;
 
     virtual bool on_receive(ISocketPipe *pipe, const char* data, uint32_t size, uint32_t flags) = 0;
+
+    // Calculate the total size of the application layer packet
+    // when this is 0, assume to read until the end of the stream.
     virtual uint32_t calc_size(const char* data, uint32_t size) = 0;
     virtual uint32_t calc_proc_size(const char* data, uint32_t size) = 0;
   };

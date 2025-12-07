@@ -3,6 +3,10 @@
 #include "netpp/http/response.h"
 #include "netpp/socket.h"
 
+#ifdef max
+#undef max
+#endif
+
 namespace netpp {
 
   bool DNS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
@@ -61,6 +65,9 @@ namespace netpp {
 
     if (const char* h_end = HTTP_Response::header_end(data, size)) {
       uint32_t content_length = HTTP_Response::content_length(data, size);
+      if (content_length == std::numeric_limits<uint32_t>::max()) {
+        return 0;
+      }
       return ((uint32_t)(h_end - data) + 4) + content_length;
     }
     return 0;

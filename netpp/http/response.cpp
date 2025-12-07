@@ -394,7 +394,7 @@ namespace netpp {
   uint32_t HTTP_Response::content_length(const char* http_buf, int buflen) {
     const char* content_len_header = strstr(http_buf, "Content-Length: ");
     if (!content_len_header) {
-      return 0;
+      return std::numeric_limits<uint32_t>::max();
     }
 
     uint32_t content_len = std::stoi(content_len_header + 16);
@@ -411,11 +411,22 @@ namespace netpp {
 
   bool HTTP_Response::has_header(const std::string& header) const {
     for (int i = 0; i < m_headers.size(); ++i) {
-      if (m_headers[i] == header) {
+      std::string header_label = m_headers[i].substr(0, m_headers[i].find(':'));
+      if (header_label == header) {
         return true;
       }
     }
     return false;
+  }
+  
+  std::string HTTP_Response::get_header_value(const std::string& header) const {
+    for (int i = 0; i < m_headers.size(); ++i) {
+      std::string header_label = m_headers[i].substr(0, m_headers[i].find(':'));
+      if (header_label == header) {
+        return m_headers[i].substr(header_label.size() + 2);
+      }
+    }
+    return "";
   }
 
   const char* http_response_status(EHTTP_ResponseStatusCode status) {

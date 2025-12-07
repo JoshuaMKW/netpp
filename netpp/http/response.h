@@ -97,8 +97,11 @@ namespace netpp {
 
     EHTTP_ResponseStatusCode status_code() const { return m_status; }
     std::string version() const { return m_version; }
+
     const std::vector<std::string>& headers() const { return m_headers; }
     std::string body() const { return m_body; }
+
+    std::string get_header_value(const std::string& header) const;
 
     void set_version(const std::string& version) { m_version = version; }
 

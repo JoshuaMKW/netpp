@@ -47,6 +47,7 @@ namespace netpp {
       m_proc_buf = nullptr;
       m_bytes_total = 0;
       m_bytes_processed = 0;
+      m_proc_until_closed = 0;
     }
 
     SocketProcData(ISocketPipe* pipe) {
@@ -54,12 +55,14 @@ namespace netpp {
       m_proc_buf = nullptr;
       m_bytes_total = 0;
       m_bytes_processed = 0;
+      m_proc_until_closed = 0;
     }
 
     ISocketPipe* m_pipe;
     char* m_proc_buf;
     uint32_t m_bytes_processed;
     uint32_t m_bytes_total;
+    bool m_proc_until_closed;
   };
 
   class NETPP_API ISocketPipe {
