@@ -391,6 +391,36 @@ namespace netpp {
     return http_buf + buflen;
   }
 
+  EHTTP_ContentEncoding HTTP_Response::content_encoding(const char* http_buf, int buflen)
+  {
+    const char* content_enc_header = strstr(http_buf, "Content-Encoding: ");
+    if (!content_enc_header) {
+      return EHTTP_ContentEncoding::E_NONE;
+    }
+
+    const char* enc_start = content_enc_header + 18;
+    const char* enc_end = strchr(enc_start, '\r');
+    char encoding[16] = {};
+    strncpy_s(encoding, enc_start, enc_end - enc_start);
+
+    return http_content_encoding_from_str(encoding);
+  }
+
+  EHTTP_TransferEncoding HTTP_Response::transfer_encoding(const char* http_buf, int buflen)
+  {
+    const char* content_enc_header = strstr(http_buf, "Transfer-Encoding: ");
+    if (!content_enc_header) {
+      return EHTTP_TransferEncoding::E_NONE;
+    }
+
+    const char* enc_start = content_enc_header + 19;
+    const char* enc_end = strchr(enc_start, '\r');
+    char encoding[16] = {};
+    strncpy_s(encoding, enc_start, enc_end - enc_start);
+
+    return http_transfer_encoding_from_str(encoding);
+  }
+
   uint32_t HTTP_Response::content_length(const char* http_buf, int buflen) {
     const char* content_len_header = strstr(http_buf, "Content-Length: ");
     if (!content_len_header) {

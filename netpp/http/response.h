@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "netpp/netpp.h"
+#include "netpp/http/headers.h"
 
 namespace netpp {
 
@@ -93,6 +94,8 @@ namespace netpp {
     static const char* body_begin(const char* http_buf, int buflen);
     static const char* body_end(const char* http_buf, int buflen);
 
+    static EHTTP_ContentEncoding content_encoding(const char* http_buf, int buflen);
+    static EHTTP_TransferEncoding transfer_encoding(const char* http_buf, int buflen);
     static uint32_t content_length(const char* http_buf, int buflen);
 
     EHTTP_ResponseStatusCode status_code() const { return m_status; }
@@ -103,13 +106,13 @@ namespace netpp {
 
     std::string get_header_value(const std::string& header) const;
 
-    void set_version(const std::string& version) { m_version = version; }
-
     void add_header(const std::string& header);
     void set_body(const std::string& body);
 
     bool has_header(const std::string& header) const;
     bool has_body() const { return !m_body.empty(); }
+
+    void set_version(const std::string& version) { m_version = version; }
 
   protected:
     HTTP_Response() = default;
@@ -124,8 +127,9 @@ namespace netpp {
     ~HTTP_Response() = default;
 
   private:
-    EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
     std::string m_version;
+    EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
+
     std::vector<std::string> m_headers;
     std::string m_body;
   };

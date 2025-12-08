@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "netpp/netpp.h"
+#include "netpp/http/headers.h"
 
 namespace netpp {
 

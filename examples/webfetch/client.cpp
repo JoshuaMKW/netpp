@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 
 #include "client.h"
@@ -6,6 +7,7 @@
 #include "tls/security.h"
 
 using namespace netpp;
+using namespace std::chrono_literals;
 
 #define CLIENT_KEY "certs/client_key.pem"
 #define CLIENT_USE_TLS 1
@@ -92,15 +94,18 @@ int main(int argc, char** argv) {
     "Accept: */*");
   //request->add_header("Upgrade-Insecure-Requests: 1");
   request->add_header("User-Agent: JuniorsToolbox/0.0.1");
-  if (!client.send(request)) {
-    fprintf(stderr, "Failed to send HTTP request\n");
-    return 1;
-  }
 
   while (client.is_running()) {
     if (!client.is_connected()) {
       break;
     }
+
+    if (!client.send(request)) {
+      fprintf(stderr, "Failed to send HTTP request\n");
+      return 1;
+    }
+
+    std::this_thread::sleep_for(1s);
   }
 
   sockets_deinitialize();

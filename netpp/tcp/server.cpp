@@ -356,22 +356,6 @@ namespace netpp {
 
     //data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
 
-    // Under this circumstance, the total data hasn't been determined
-    // yet, so allocate a temporary smaller one to process
-    // the adapter with...
-    // ---
-    // We create a copy of the proc buffer pointer because
-    // later we do some pointer swapping based on the
-    // predicted size of the processed data...
-    // ---
-    char* proc_buf = nullptr;
-    if (data.m_bytes_total == 0) {
-      proc_buf = new char[info.m_bytes_transferred];
-    }
-    else {
-      proc_buf = data.m_proc_buf;
-    }
-
     // Here we process enough to determine the underlying protocol
     // ---
     // The goal is this--m_proc_buf points to the potentially decrypted
@@ -381,66 +365,98 @@ namespace netpp {
     // processed, we are able to stitch together fragmented
     // data packets incoming from the socket...
     // ---
-    char* post_out;
-    int32_t true_size = pipe->proc_post_recv(
-      &post_out,
-      recv_buf,
-      info.m_bytes_transferred
+    const char* proc_out;
+    uint32_t proc_size, recv_digested;
+    EProcState proc_state = pipe->proc_data(
+      &proc_out,
+      &proc_size,
+      &recv_digested,
+      data.m_recv_buf,
+      data.m_recv_buf_size
     );
 
-    // It has failed in some manner...
-    // ---
-    if (true_size < 0) {
-      delete[] proc_buf;
-      inproc = false;
+    if (proc_state == EProcState::E_FAILED) {
       return nullptr;
     }
+
+    if (recv_digested > 0) {
+      data.m_recv_buf_size -= recv_digested;
+      memmove_s(data.m_recv_buf, data.m_recv_buf_size, data.m_recv_buf + recv_digested, data.m_recv_buf_size);
+    }
+
+    // Prepare the copied recv buffer by reallocing and
+    // concatenating the new data. This is eventually processed
+    // all at once, either on the first pass for unencrypted
+    // data, or potentially after many recv streams when encrypted.
+    // ---
+    char* proc_recv_buf = (char*)realloc(data.m_recv_buf, data.m_recv_buf_size + info.m_bytes_transferred);
+    if (proc_recv_buf) {
+      data.m_recv_buf = proc_recv_buf;
+    }
+    memmove_s(data.m_recv_buf + data.m_recv_buf_size, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+    data.m_recv_buf_size += info.m_bytes_transferred;
 
     // Under this circumstance, the pipe is waiting
     // for more data to be received to complete the
     // processing. This is important for TLS Records
     // and other such structures...
     // ---
-    if (true_size == 0) {
-      delete[] proc_buf;
+    if (proc_state == EProcState::E_WANTS_DATA) {
       inproc = true;
       return nullptr;
     }
 
+    // Now the received data has been successfully post-processed
+    // (decrypted, etc) and is ready for consumption.
+    // ---
+    // However, under this circumstance, the total data
+    // hasn't been determined yet, so allocate a temporary
+    // smaller one to process the adapter with...
+    // ---
+    // We create a copy of the proc buffer pointer because
+    // later we do some pointer swapping based on the
+    // predicted size of the processed data...
+    // ---
+    char* proc_buf = nullptr;
+    if (data.m_bytes_total == 0) {
+      proc_buf = (char*)malloc(data.m_recv_buf_size);
+      data.m_bytes_processed = 0;
+    }
+    else {
+      // At this point the total expected size of whatever
+      // processed application layer protocol has been
+      // determined and preallocated. So we just use
+      // that calculation.
+      // ---
+      proc_buf = data.m_proc_buf;
+    }
+
     // Update the processed marker so the next pass is correctly offset...
     // ---
-    memcpy_s(proc_buf + data.m_bytes_processed, true_size, post_out, true_size);
-    data.m_bytes_processed += true_size;
+    const uint32_t cur_processed = data.m_bytes_processed + proc_size;
+    memcpy_s(proc_buf + data.m_bytes_processed, proc_size, proc_out, proc_size);
 
     // Then we attempt to identify what kind of data is coming in from
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_security);
-    if (!adapter) {
-      delete adapter;
-      delete[] proc_buf;
-      inproc = false;
-      return nullptr;
-    }
+    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
-    if (data.m_bytes_total == 0) {
-      data.m_bytes_total = adapter->calc_size(proc_buf, data.m_bytes_processed);
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
+      data.m_bytes_total = adapter->calc_size(proc_buf, cur_processed);
+      data.m_proc_until_closed = data.m_bytes_total == 0;
     }
 
     // If the adapter is not valid, we need to reset the state
     // and return an error...
     // ---
-    if (data.m_bytes_total == 0) {
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-      delete adapter;
-      delete[] proc_buf;
-
       data.m_bytes_total = 0;
       data.m_bytes_processed = 0;
-      delete[] data.m_proc_buf;
+      free(data.m_proc_buf);
       data.m_proc_buf = nullptr;
       return nullptr;
     }
@@ -449,16 +465,30 @@ namespace netpp {
     // the total expected data, we go ahead and resize the
     // buffer to be the total bytes for the upcoming reads...
     // ---
-    if (!data.m_proc_buf) {
-      if (data.m_bytes_total > info.m_bytes_transferred) {
-        char* new_proc_buf = new char[data.m_bytes_total];
+    if (data.m_proc_until_closed) {
+      char* new_proc_buf = (char*)realloc(data.m_proc_buf, cur_processed);
+      if (new_proc_buf) {
+        if (!data.m_proc_buf) {
+          memcpy_s(
+            new_proc_buf,
+            data.m_bytes_processed,
+            proc_buf,
+            data.m_bytes_processed
+          );
+        }
+        data.m_proc_buf = new_proc_buf;
+      }
+    }
+    else if (!data.m_proc_buf) {
+      if (data.m_bytes_total > data.m_recv_buf_size) {
+        char* new_proc_buf = (char*)malloc(data.m_bytes_total);
         memcpy_s(
           new_proc_buf,
           data.m_bytes_processed,
           proc_buf,
           data.m_bytes_processed
         );
-        delete[] proc_buf;
+        free(proc_buf);
         data.m_proc_buf = new_proc_buf;
       }
       else {
@@ -466,9 +496,11 @@ namespace netpp {
       }
     }
 
+    data.m_bytes_processed = cur_processed;
+
+
     // Initiate the next read...
-    if (data.m_bytes_processed < data.m_bytes_total) {
-      delete adapter;
+    if (data.m_proc_until_closed || data.m_bytes_processed < data.m_bytes_total) {
       uint32_t flags = 0;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;

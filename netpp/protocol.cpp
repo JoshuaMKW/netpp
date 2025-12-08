@@ -64,6 +64,34 @@ namespace netpp {
     }
 
     if (const char* h_end = HTTP_Response::header_end(data, size)) {
+      EHTTP_TransferEncoding transfer_encoding = HTTP_Response::transfer_encoding(data, size);
+      switch (transfer_encoding) {
+      case EHTTP_TransferEncoding::E_CHUNKED:
+        // Cannot determine size with chunked encoding
+        return size;
+      case EHTTP_TransferEncoding::E_COMPRESS:
+      case EHTTP_TransferEncoding::E_DEFLATE:
+      case EHTTP_TransferEncoding::E_GZIP:
+        // Cannot determine size with compressed encoding
+        return size;
+      default:
+        break;
+      }
+
+      EHTTP_ContentEncoding content_encoding = HTTP_Response::content_encoding(data, size);
+      switch (content_encoding) {
+      case EHTTP_ContentEncoding::E_BR:
+      case EHTTP_ContentEncoding::E_COMPRESS:
+      case EHTTP_ContentEncoding::E_DCB:
+      case EHTTP_ContentEncoding::E_DCZ:
+      case EHTTP_ContentEncoding::E_GZIP:
+      case EHTTP_ContentEncoding::E_ZSTD:
+        // Cannot determine size with compressed encoding
+        return size;
+      default:
+        break;
+      }
+
       uint32_t content_length = HTTP_Response::content_length(data, size);
       if (content_length == std::numeric_limits<uint32_t>::max()) {
         return 0;

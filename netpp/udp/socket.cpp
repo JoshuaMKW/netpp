@@ -164,14 +164,20 @@ namespace netpp {
         return EIOState::E_ERROR;
       }
 
-      char* the_data;
+      ESecurityState state = m_security->encrypt(data, size, [&](const char* encrypted, size_t encrypted_size) -> bool {
+        data_ptr = encrypted;
+        data_size = (int32_t)encrypted_size;
+        return true;
+        });
 
-      data_size = m_security->encrypt(data, size, &the_data);
-      if (data_size == -1) {
+      switch (state) {
+      case ESecurityState::E_NONE:
+      case ESecurityState::E_FAILED:
+      case ESecurityState::E_WANTS_DATA:  // No reason this should happen on send
         return EIOState::E_ERROR;
+      case ESecurityState::E_SUCCEEDED:
+        break;
       }
-
-      data_ptr = the_data;
     }
 
     SocketIOState& io_state = m_io_info.m_send_state;
@@ -292,20 +298,38 @@ namespace netpp {
     return m_security->advance_handshake(this, last_op, post_transferred);
   }
 
-  int32_t UDP_Socket::proc_post_recv(char** out_data, const char* in_data, uint32_t in_size)
+  EProcState UDP_Socket::proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size)
   {
     if (!m_security) {
-      *out_data = new char[in_size];
-      memcpy_s(out_data, in_size, in_data, in_size);
-      return in_size;
+      char* proc_buf = (char*)malloc(in_size);
+      memcpy_s(proc_buf, in_size, in_data, in_size);
+      *out_data = proc_buf;
+      *out_size = in_size;
+      return EProcState::E_SUCCEEDED;
     }
 
     ETransportProtocolFlags transports = m_security->supported_transports();
-    if ((transports & ETransportProtocolFlags::E_UDP) == ETransportProtocolFlags::E_NONE) {
-      return -1;
+    if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      return EProcState::E_FAILED;
     }
 
-    return m_security->decrypt(in_data, (int32_t)in_size, out_data);
+    ESecurityState state = m_security->decrypt(in_data, (size_t)in_size, [&](const char* decrypted, size_t decrypted_size) -> bool {
+      *out_data = decrypted;
+      *out_size = (uint32_t)decrypted_size;
+      return true;
+      });
+
+    *recv_digested = m_security->get_digested_by_crypt();
+
+    switch (state) {
+    case ESecurityState::E_NONE:
+    case ESecurityState::E_FAILED:
+      return EProcState::E_FAILED;
+    case ESecurityState::E_SUCCEEDED:
+      return out_size > 0 ? EProcState::E_SUCCEEDED : EProcState::E_WANTS_DATA;
+    case ESecurityState::E_WANTS_DATA:
+      return EProcState::E_WANTS_DATA;
+    }
   }
 
 }  // namespace netpp

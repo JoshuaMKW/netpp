@@ -45,6 +45,8 @@ namespace netpp {
     SocketProcData() {
       m_pipe = nullptr;
       m_proc_buf = nullptr;
+      m_recv_buf = nullptr;
+      m_recv_buf_size = 0;
       m_bytes_total = 0;
       m_bytes_processed = 0;
       m_proc_until_closed = 0;
@@ -53,16 +55,30 @@ namespace netpp {
     SocketProcData(ISocketPipe* pipe) {
       m_pipe = pipe;
       m_proc_buf = nullptr;
+      m_recv_buf = nullptr;
+      m_recv_buf_size = 0;
       m_bytes_total = 0;
       m_bytes_processed = 0;
       m_proc_until_closed = 0;
     }
 
     ISocketPipe* m_pipe;
+    
+    char* m_recv_buf;
+    uint32_t m_recv_buf_size;
+
     char* m_proc_buf;
     uint32_t m_bytes_processed;
     uint32_t m_bytes_total;
+
     bool m_proc_until_closed;
+  };
+
+  enum class EProcState {
+    E_FAILED = -1,
+    E_NONE,
+    E_SUCCEEDED,
+    E_WANTS_DATA,
   };
 
   class NETPP_API ISocketPipe {
@@ -151,7 +167,7 @@ namespace netpp {
     virtual void* user_data() const = 0;
 
     virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
-    virtual int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) = 0;
+    virtual EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) = 0;
 
     virtual const SocketIOInfo& get_io_info() const = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
@@ -256,7 +272,7 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
-    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
+    EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
@@ -380,7 +396,7 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
-    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
+    EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }

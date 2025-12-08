@@ -42,10 +42,11 @@ namespace netpp {
     bool set_accept_state();
     bool set_connect_state();
 
-    int64_t decrypt(const char* data, size_t size, char** decrypt_out) override;
-    int64_t encrypt(const char* data, size_t size, char** encrypt_out) override;
+    ESecurityState decrypt(const char* data, uint32_t size, decrypt_cb on_decrypt) override;
+    ESecurityState encrypt(const char* data, uint32_t size, encrypt_cb on_encrypt) override;
+    uint32_t get_digested_by_crypt() const override;
 
-    virtual EAuthState advance_handshake(ISocketPipe* pipe, EPipeOperation last_op, int32_t post_transferred) override;
+    EAuthState advance_handshake(ISocketPipe* pipe, EPipeOperation last_op, int32_t post_transferred) override;
 
     enum class EProcState {
       E_FAILED,
@@ -80,6 +81,8 @@ namespace netpp {
     BIO_ADDR* m_client;
     std::atomic<bool> m_handshake_initiated;
     std::atomic<EAuthState> m_handshake_state;
+
+    uint32_t m_digested_by_crypt;
   };
 
   class DTLSSecurityFactory : public ISecurityFactory {

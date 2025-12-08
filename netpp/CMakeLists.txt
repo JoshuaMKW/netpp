@@ -53,7 +53,7 @@ add_library(netpp STATIC
     dtls/dtls_bio.h
     dtls/dtls_bio.cpp
     dtls/cookie.h
-)
+ "http/headers.h" "http/headers.cpp")
 
 # Include directories
 target_include_directories(netpp PUBLIC 
