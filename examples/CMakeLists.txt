@@ -9,4 +9,5 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Add subdirectories for subprojects
 add_subdirectory(Chatroom)
+add_subdirectory(Webfetch)
 add_subdirectory(Webstatic)

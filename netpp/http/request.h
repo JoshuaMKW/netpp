@@ -1,8 +1,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
-#include "netpp.h"
+#include "netpp/netpp.h"
+#include "netpp/http/headers.h"
 
 namespace netpp {
 
@@ -24,6 +26,8 @@ namespace netpp {
 
   class NETPP_API HTTP_Request {
   public:
+    using HeaderPair = std::pair<std::string, std::string>;
+
     static bool is_http_request(const char* http_buf, uint32_t buflen);
     static HTTP_Request* create(EHTTP_RequestMethod type);
     static HTTP_Request* create(const char* http_buf, uint32_t buflen);
@@ -42,15 +46,17 @@ namespace netpp {
 
     EHTTP_RequestMethod method() const { return m_method; }
     std::string path() const { return m_path; }
+
     std::string version() const { return m_version; }
-    const std::string* headers() const { return m_headers; }
-    int headers_count() const { return m_headers_count; }
+
+    const std::vector<HeaderPair>& headers() const { return m_headers; }
+    const std::vector<std::string>& queries() const { return m_queries; }
     std::string body() const { return m_body; }
 
     void set_path(const std::string& path) { m_path = path; }
     void set_version(const std::string& version) { m_version = version; }
+    void set_header(const std::string& header, const std::string& value = "");
 
-    void add_header(const std::string& header);
     void add_query(const std::string& query);
 
     void set_body(const std::string& body);
@@ -68,19 +74,14 @@ namespace netpp {
     HTTP_Request(HTTP_Request&&) = default;
     HTTP_Request& operator=(HTTP_Request&&) = default;
 
-    ~HTTP_Request() {
-      delete[] m_headers;
-      delete[] m_queries;
-    }
+    ~HTTP_Request() = default;
 
   private:
     EHTTP_RequestMethod m_method = EHTTP_RequestMethod::E_NONE;
     std::string m_path;
     std::string m_version;
-    std::string* m_headers = nullptr;
-    int m_headers_count = 0;
-    std::string* m_queries = nullptr;
-    int m_queries_count = 0;
+    std::vector<HeaderPair> m_headers;
+    std::vector<std::string> m_queries;
     std::string m_body;
   };
 

@@ -1,5 +1,7 @@
-#include "request.h"
+#include <algorithm>
 #include <string.h>
+
+#include "request.h"
 
 namespace netpp {
 
@@ -103,8 +105,8 @@ namespace netpp {
     request->m_method = type;
     request->m_path = "";
     request->m_version = "";
-    request->m_headers = new std::string[32]();
-    request->m_headers_count = 0;
+    request->m_headers.reserve(32);
+    request->m_queries.reserve(32);
     request->m_body = "";
     return request;
   }
@@ -221,7 +223,7 @@ namespace netpp {
       }
       else if (!header_str.empty()) {
         // Continue parsing headers
-        request->add_header(header_str);
+        request->set_header(header_str);
       }
 
       header = next_line(end_header, end);
@@ -311,8 +313,17 @@ namespace netpp {
     return content_len;
   }
 
-  void HTTP_Request::add_header(const std::string& header) {
-    m_headers[m_headers_count++] = header;
+  void HTTP_Request::set_header(const std::string& header, const std::string& value) {
+    auto header_it = std::find_if(m_headers.begin(), m_headers.end(), [&header](const HeaderPair& it_header) {
+      return it_header.first == header;
+    });
+
+    if (header_it == m_headers.end()) {
+      m_headers.emplace_back(header, value);
+      return;
+    }
+
+    header_it->second = value;
   }
 
   void HTTP_Request::set_body(const std::string& body) {
@@ -320,25 +331,20 @@ namespace netpp {
   }
 
   void HTTP_Request::add_query(const std::string& query) {
-    m_queries[m_queries_count++] = query;
+    m_queries.push_back(query);
   }
 
   bool HTTP_Request::has_header(const std::string& header) const {
-    for (int i = 0; i < m_headers_count; ++i) {
-      if (m_headers[i] == header) {
-        return true;
-      }
-    }
-    return false;
+    return std::any_of(m_headers.begin(), m_headers.end(),
+      [&header](const HeaderPair& h) { return h.first == header; });
   }
 
   std::string HTTP_Request::build(const HTTP_Request& request) {
     std::string request_str = http_request_str(request.method());
     request_str += " " + request.path() + " HTTP/" + request.version() + "\r\n";
 
-    const std::string* headers = request.headers();
-    for (int i = 0; i < request.headers_count(); i++) {
-      request_str += headers[i] + "\r\n";
+    for (const HeaderPair& hdr : request.headers()) {
+      request_str += hdr.first + ": " + hdr.second + "\r\n";
     }
 
     if (request.has_body()) {
@@ -365,9 +371,8 @@ namespace netpp {
     http_size += request.path().length();
     http_size += request.version().length() + 5;
 
-    const std::string* headers = request.headers();
-    for (int i = 0; i < request.headers_count(); i++) {
-      http_size += headers[i].length() + 2;  // 1 carriage return, 1 newline
+    for (const HeaderPair& hdr : request.headers()) {
+      http_size += hdr.first.length() + hdr.second.length() + 4;  // `: `, 1 carriage return, 1 newline
     }
 
     if (request.has_body()) {
@@ -411,24 +416,32 @@ namespace netpp {
     memcpy(buf_out + offset, request.version().c_str(), version_len);
     offset += version_len;
 
-    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';  // Swapped endian
     offset += 2;
     //--------------------------------------------------------------
 
     //--------------------------------------------------------------
     // Headers
-    for (int i = 0; i < request.headers_count(); i++) {
-      size_t header_len = headers[i].length();
-      memcpy(buf_out + offset, headers[i].c_str(), header_len);
-      offset += header_len;
-      *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    for (const HeaderPair& hdr : request.headers()) {
+      size_t header_field_len = hdr.first.length();
+      memcpy(buf_out + offset, hdr.first.c_str(), header_field_len);
+      offset += header_field_len;
+      
+      *(uint16_t*)((uint8_t*)buf_out + offset) = ' :';
+      offset += 2;
+
+      size_t header_value_len = hdr.second.length();
+      memcpy(buf_out + offset, hdr.second.c_str(), header_value_len);
+      offset += header_value_len;
+
+      *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';  // Swapped endian
       offset += 2;
     }
     //--------------------------------------------------------------
 
     //--------------------------------------------------------------
     // End of headers
-    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';
+    *(uint16_t*)((uint8_t*)buf_out + offset) = '\r\n';  // Swapped endian
     offset += 2;
     //--------------------------------------------------------------
 

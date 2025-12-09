@@ -1,3 +1,12 @@
+// **************************************************************
+// * netpp C++ Networking Library (webstatic example)
+// * Copyright (C) 2024-2025 Joshua Alston
+// *
+// * This program is free software; you can redistribute it and/or
+// * modify it under the terms of the GNU General Public License
+// * as published by the Free Software Foundation; either version 2
+// * of the License, or (at your option) any later version.
+// **************************************************************
 
 #include <chrono>
 #include <iostream>
@@ -6,7 +15,8 @@
 
 #include "socket.h"
 #include "server.h"
-#include "tls/controller.h"
+#include "http/router.h"
+#include "tls/security.h"
 
 #include "network.h"
 
@@ -18,9 +28,10 @@ using namespace std::chrono_literals;
 #define SERVER_USE_TLS true
 
 #if SERVER_USE_TLS
-#define SERVER_CERT "./cert/cert.pem"
-#define SERVER_KEY "./cert/key.pem"
-#define SERVER_CERT_PASSWD "password"
+#define SERVER_CERT "./cert/localhost.crt"
+#define SERVER_KEY "./cert/localhost.key"
+#define SERVER_CACERT "./cert/rootCA.pem"
+#define SERVER_CERT_PASSWD ""
 
 #define SERVER_PORT "443"
 #else
@@ -34,8 +45,8 @@ using namespace std::chrono_literals;
 static HTTP_Response* get_response(const std::string& content_type, const std::string& body) {
   HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
   response->set_version("1.1");
-  response->add_header("Content-Type: " + content_type + "; charset=UTF-8");
-  response->add_header("Connection: keep-alive");
+  response->set_header("Content-Type: " + content_type + "; charset=UTF-8");
+  response->set_header("Connection: keep-alive");
   response->set_body(body);
   return response;
 }
@@ -49,8 +60,8 @@ static HTTP_Response* not_found_response() {
 static HTTP_Response* method_not_allowed_response() {
   HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_METHOD_NOT_ALLOWED);
   response->set_version("1.1");
-  response->add_header("Content-Type: text/plain; charset=UTF-8");
-  response->add_header("Connection: keep-alive");
+  response->set_header("Content-Type: text/plain; charset=UTF-8");
+  response->set_header("Connection: keep-alive");
   return response;
 }
 
@@ -60,64 +71,71 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  HTTP_Router http_router;
+
+  http_router.on_get("/", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream html_file("./webdata/index.html");
+
+    if (!html_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string html_content((std::istreambuf_iterator<char>(html_file)), std::istreambuf_iterator<char>());
+
+    return get_response("text/html", html_content);
+    });
+
+  http_router.on_get("/index.css", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream css_file("./webdata/index.css");
+
+    if (!css_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
+
+    return get_response("text/css", css_content);
+    });
+
+  http_router.on_get("/index.css", [](const HTTP_Request* request) -> HTTP_Response* {
+    std::ifstream favicon_file("./webdata/favicon.ico");
+
+    if (!favicon_file.is_open()) {
+      return not_found_response();
+    }
+
+    std::string favicon_content((std::istreambuf_iterator<char>(favicon_file)), std::istreambuf_iterator<char>());
+
+    return get_response("image/x-icon", favicon_content);
+    });
+
+  http_router.on_unhandled([](const HTTP_Request* request) -> HTTP_Response* {
+    return method_not_allowed_response();
+    });
+
 #if SERVER_USE_TLS
-  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD);
+  TLSSecurityFactory* security
+    = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, SERVER_CACERT, "localhost", SERVER_CERT_PASSWD,
+      ETLSVerifyFlags::VERIFY_PEER | ETLSVerifyFlags::VERIFY_FAIL_IF_NO_PEER_CERT);
 #else
-  TLSSecurityController* security = nullptr;
+  TLSSecurityFactory* security = nullptr;
 #endif
 
-  TCP_Server server(security, 1024);
+  // Create a server instance with TLS security and 1024 sockets
+  TCP_Server server(nullptr, 1024);
 
+  server.on_http_request([&http_router](const ISocketPipe* source, const HTTP_Request* request) {
+    return http_router.signal_method(request);
+    });
+
+  // Start the server and enter a loop
   if (server.start(SERVER_IPV4, SERVER_PORT)) {
     printf("Server started on %s:%s\n", server.hostname().c_str(), server.port().c_str());
-  } else {
+  }
+  else {
     fprintf(stderr, "Failed to start the server\n");
     return 1;
   }
-
-  server.on_http_request([](const ISocketPipe* source, const HTTP_Request* request) {
-    printf("Received request: %d for URL %s\n", (int)request->method(), request->path().c_str());
-
-    if (request->method() != EHTTP_RequestMethod::E_REQUEST_GET) {
-      return method_not_allowed_response();
-    }
-
-    if (request->path() == "/") {
-      std::ifstream html_file("./webdata/index.html");
-
-      if (!html_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string html_content((std::istreambuf_iterator<char>(html_file)), std::istreambuf_iterator<char>());
-
-      return get_response("text/html", html_content);
-    }
-    
-    if (request->path() == "/index.css") {
-      std::ifstream css_file("./webdata/index.css");
-      if (!css_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string css_content((std::istreambuf_iterator<char>(css_file)), std::istreambuf_iterator<char>());
-
-      return get_response("text/css", css_content);
-    }
-    
-    if (request->path() == "/favicon.ico") {
-      std::ifstream favicon_file("./webdata/favicon.ico");
-      if (!favicon_file.is_open()) {
-        return not_found_response();
-      }
-
-      std::string favicon_content((std::istreambuf_iterator<char>(favicon_file)), std::istreambuf_iterator<char>());
-
-      return get_response("image/x-icon", favicon_content);
-    }
-
-    return not_found_response();
-    });
 
   while (server.is_running()) {
     std::this_thread::sleep_for(100ms);

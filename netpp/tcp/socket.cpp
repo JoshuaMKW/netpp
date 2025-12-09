@@ -2,25 +2,26 @@
 #include <iostream>
 #include <thread>
 
-#include "network.h"
-#include "socket.h"
+#include "netpp/network.h"
+#include "netpp/socket.h"
 
-#include "server.h"
+#include "netpp/server.h"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
 
-#ifdef _WIN32
-
 namespace netpp {
 
   TCP_Socket::TCP_Socket(ISocketPipe* root_socket,
-    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ESocketHint hint)
-    : m_hint(hint), m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+    StaticBlockAllocator* recv_allocator, StaticBlockAllocator* send_allocator, ISecurityController* security, ESocketHint hint)
+    : m_security(security), m_hint(hint),
+    m_recv_buf_block(StaticBlockAllocator::INVALID_BLOCK), m_send_buf_block(StaticBlockAllocator::INVALID_BLOCK) {
+
     ISocketOSSupportLayer* layer = nullptr;
     if (root_socket) {
       layer = root_socket->get_os_layer();
     }
+
     m_socket_layer = SocketOSSupportLayerFactory::create(
       layer,
       recv_allocator, send_allocator,
@@ -31,7 +32,21 @@ namespace netpp {
   bool TCP_Socket::open(const char* hostname, const char* port) {
     m_host_name = hostname;
     m_port = port;
-    return m_socket_layer->open(hostname, port);
+
+    if (!m_socket_layer->open(hostname, port)) {
+      return false;
+    }
+
+    if (m_security) {
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+        m_socket_layer->close();
+        return false;
+      }
+      return m_security->initialize();
+    }
+
+    return true;
   }
 
   bool TCP_Socket::open(uint64_t socket_) {
@@ -48,23 +63,81 @@ namespace netpp {
 
     m_port = std::to_string(ntohs(addr.sin_port));
 
-    return m_socket_layer->open(socket_);
+    if (!m_socket_layer->open(socket_)) {
+      return false;
+    }
+
+    if (m_security) {
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+        m_socket_layer->close();
+        return false;
+      }
+      return m_security->initialize();
+    }
+
+    return true;
   }
 
   void TCP_Socket::close() {
     m_socket_layer->close();
     m_host_name = "";
     m_port = "";
+
+    if (m_security) {
+      m_security->deinitialize();
+    }
+  }
+
+  bool TCP_Socket::accept(accept_cond_cb accept_cond, accept_cb accept_routine) {
+    if (m_security) {
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+        return false;
+      }
+
+      if (!m_security->set_accept_state()) {
+        return false;
+      }
+    }
+
+    return m_socket_layer->accept(accept_cond, accept_routine);
+  }
+
+  bool TCP_Socket::connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) {
+    if (m_security) {
+      ETransportProtocolFlags transports = m_security->supported_transports();
+      if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+        return false;
+      }
+
+      if (!m_security->set_connect_state()) {
+        return false;
+      }
+    }
+
+    if (!m_socket_layer->connect(timeout, recv_flowspec, send_flowspec)) {
+      return false;
+    }
+
+    if (m_security) {
+      if (proc_pending_auth(EPipeOperation::E_NONE, 0) == EAuthState::E_FAILED) {
+        return false;
+      }
+
+      while (!m_security->is_authenticated()) {
+        std::this_thread::sleep_for(16ms);
+        if (m_security->is_failed()) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   EIOState TCP_Socket::recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) {
     SocketIOState& io_state = m_io_info.m_recv_state;
-
-    //if (io_state.m_state == EIOState::E_ASYNC) {
-    //  // The socket is busy, call again
-    //  // after the transaction confirms
-    //  return EIOState::E_BUSY;
-    //}
 
     int32_t ret = m_socket_layer->recv(offset, flags, transferred_out);
     EIOState state = m_socket_layer->state(EPipeOperation::E_RECV);
@@ -98,18 +171,44 @@ namespace netpp {
       return EIOState::E_ERROR;
     }
 
+    const char* data_ptr = data;
+    uint32_t data_size = size;
+    if (m_security) {
+      if (!flags || (*flags & (uint32_t)ESendFlags::E_FORCE_INSECURE) == (uint32_t)ESendFlags::E_NONE) {
+        ETransportProtocolFlags transports = m_security->supported_transports();
+        if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+          return EIOState::E_ERROR;
+        }
+
+        ESecurityState state = m_security->encrypt(data, size, [&](const char* encrypted, size_t encrypted_size) -> bool {
+          data_ptr = encrypted;
+          data_size = (int32_t)encrypted_size;
+          return true;
+          });
+
+        switch (state) {
+        case ESecurityState::E_NONE:
+        case ESecurityState::E_FAILED:
+        case ESecurityState::E_WANTS_DATA:  // No reason this should happen on send
+          return EIOState::E_ERROR;
+        case ESecurityState::E_SUCCEEDED:
+          break;
+        }
+      }
+    }
+
     SocketIOState& io_state = m_io_info.m_send_state;
 
     EIOState last_state = m_socket_layer->state(EPipeOperation::E_SEND);
 
     if (last_state == EIOState::E_PARTIAL) {
-      if (!flags || (*flags & IO_FLAG_PARTIAL) == 0) {
+      if (!flags || (*flags & (uint32_t)ESendFlags::E_PARTIAL_IO) == 0) {
         // The socket is busy, call again
         // after the transaction confirms
         return EIOState::E_BUSY;
       }
 
-      int32_t transferred = m_socket_layer->send(data, size, flags);
+      int32_t transferred = m_socket_layer->send(data_ptr, (uint32_t)data_size, flags);
       EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
 
       switch (state) {
@@ -137,7 +236,7 @@ namespace netpp {
       }
     }
 
-    int32_t transferred = m_socket_layer->send(data, size, flags);
+    int32_t transferred = m_socket_layer->send(data_ptr, (uint32_t)data_size, flags);
     EIOState state = m_socket_layer->state(EPipeOperation::E_SEND);
 
     switch (state) {
@@ -202,6 +301,54 @@ namespace netpp {
     m_signal_sip_response = tcp->m_signal_sip_response;
   }
 
-}  // namespace netpp
+  EAuthState TCP_Socket::proc_pending_auth(EPipeOperation last_op, int32_t post_transferred)
+  {
+    if (!m_security) {
+      return EAuthState::E_NONE;
+    }
 
-#endif
+    ETransportProtocolFlags transports = m_security->supported_transports();
+    if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      return EAuthState::E_FAILED;
+    }
+
+    return m_security->advance_handshake(this, last_op, post_transferred);
+  }
+
+  EProcState TCP_Socket::proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size)
+  {
+    if (!m_security) {
+      char* proc_buf = (char*)malloc(in_size);
+      memcpy_s(proc_buf, in_size, in_data, in_size);
+      *out_data = proc_buf;
+      *out_size = in_size;
+      return EProcState::E_SUCCEEDED;
+    }
+
+    ETransportProtocolFlags transports = m_security->supported_transports();
+    if ((transports & ETransportProtocolFlags::E_TCP) == ETransportProtocolFlags::E_NONE) {
+      return EProcState::E_FAILED;
+    }
+
+    ESecurityState state = m_security->decrypt(in_data, (size_t)in_size, [&](const char* decrypted, size_t decrypted_size) -> bool {
+      *out_data = decrypted;
+      *out_size = decrypted_size;
+      return true;
+      });
+
+    *recv_digested = m_security->get_digested_by_crypt();
+
+    switch (state) {
+    case ESecurityState::E_NONE:
+    case ESecurityState::E_FAILED:
+      return EProcState::E_FAILED;
+    case ESecurityState::E_SUCCEEDED:
+      return out_size > 0 ? EProcState::E_SUCCEEDED : EProcState::E_WANTS_DATA;
+    case ESecurityState::E_WANTS_DATA:
+      return EProcState::E_WANTS_DATA;
+    case ESecurityState::E_FIN_PROCESSED:
+      return EProcState::E_FIN_PROCESSED;
+    }
+  }
+
+}  // namespace netpp

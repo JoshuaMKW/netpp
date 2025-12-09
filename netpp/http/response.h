@@ -1,8 +1,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
-#include "netpp.h"
+#include "netpp/netpp.h"
+#include "netpp/http/headers.h"
 
 namespace netpp {
 
@@ -92,21 +94,25 @@ namespace netpp {
     static const char* body_begin(const char* http_buf, int buflen);
     static const char* body_end(const char* http_buf, int buflen);
 
+    static EHTTP_ContentEncoding content_encoding(const char* http_buf, int buflen);
+    static EHTTP_TransferEncoding transfer_encoding(const char* http_buf, int buflen);
     static uint32_t content_length(const char* http_buf, int buflen);
 
     EHTTP_ResponseStatusCode status_code() const { return m_status; }
     std::string version() const { return m_version; }
-    const std::string* headers() const { return m_headers; }
-    int headers_count() const { return m_headers_count; }
+
+    const std::vector<std::string>& headers() const { return m_headers; }
     std::string body() const { return m_body; }
 
-    void set_version(const std::string& version) { m_version = version; }
+    std::string get_header_value(const std::string& header) const;
 
-    void add_header(const std::string& header);
+    void set_header(const std::string& header);
     void set_body(const std::string& body);
 
     bool has_header(const std::string& header) const;
     bool has_body() const { return !m_body.empty(); }
+
+    void set_version(const std::string& version) { m_version = version; }
 
   protected:
     HTTP_Response() = default;
@@ -118,15 +124,13 @@ namespace netpp {
     HTTP_Response(HTTP_Response&&) = default;
     HTTP_Response& operator=(HTTP_Response&&) = default;
 
-    ~HTTP_Response() {
-      delete[] m_headers;
-    }
+    ~HTTP_Response() = default;
 
   private:
-    EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
     std::string m_version;
-    std::string* m_headers = nullptr;
-    int m_headers_count = 0;
+    EHTTP_ResponseStatusCode m_status = EHTTP_ResponseStatusCode::E_NONE;
+
+    std::vector<std::string> m_headers;
     std::string m_body;
   };
 

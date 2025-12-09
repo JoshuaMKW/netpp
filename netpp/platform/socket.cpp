@@ -5,10 +5,10 @@
 #include <iostream>
 #include <thread>
 
-#include "network.h"
-#include "socket.h"
+#include "netpp/network.h"
+#include "netpp/socket.h"
 
-#include "server.h"
+#include "netpp/server.h"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -124,11 +124,19 @@ namespace netpp {
   static WSADATA wsa_data;
 
   bool sockets_initialize() {
+    if (wsa_data.iMaxSockets > 0 && wsa_data.wVersion == 2) {
+      return true;
+    }
+
     // Initialize Winsock
     return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
   }
 
   void sockets_deinitialize() {
+    if (wsa_data.iMaxSockets == 0 || wsa_data.wVersion != 2) {
+      return;
+    }
+
     WSACleanup();
   }
 
@@ -152,14 +160,53 @@ namespace netpp {
     E_START,
   };
 
-  RIO_EXTENSION_FUNCTION_TABLE* s_rio;
+  RIO_EXTENSION_FUNCTION_TABLE* s_rio = nullptr;
+  LPFN_WSARECVMSG s_WSARecvMsg = nullptr;
+  LPFN_WSASENDMSG s_WSASendMsg = nullptr;
+
+  static int _win32_init_wsa(SOCKET in_sock) {
+    sockets_initialize();
+
+    DWORD bytes = 0;
+    GUID wsa_recvmsg_guid = WSAID_WSARECVMSG;
+    GUID wsa_sendmsg_guid = WSAID_WSASENDMSG;
+
+    if (s_WSARecvMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSARecvMsg, sizeof(s_WSARecvMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    if (s_WSASendMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSASendMsg, sizeof(s_WSASendMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    return 0;
+  }
+
+  static int _win32_deinit_wsa(SOCKET in_sock) {
+    sockets_deinitialize();
+    s_WSARecvMsg = nullptr;
+    s_WSASendMsg = nullptr;
+    return 0;
+  }
 
   static int _win32_init_rio(SOCKET in_sock) {
     if (s_rio) {
       return 0;
     }
 
-    sockets_initialize();
+    _win32_init_wsa(in_sock);
 
     s_rio = new RIO_EXTENSION_FUNCTION_TABLE();
 
@@ -184,7 +231,7 @@ namespace netpp {
   }
 
   static int _win32_deinit_rio(SOCKET in_sock) {
-    sockets_initialize();
+    _win32_deinit_wsa(in_sock);
 
     if (!s_rio) {
       return 0;
@@ -274,11 +321,11 @@ namespace netpp {
       bool result = true;
 
       if (m_recv_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes, m_socket });
       }
 
       if (m_send_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes, m_socket });
       }
 
       return result;
@@ -288,6 +335,7 @@ namespace netpp {
     ISocketOSSupportLayer* m_pipe;
     uint32_t m_recv_bytes;
     uint32_t m_send_bytes;
+    uint64_t m_socket;
   };
 
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
@@ -354,7 +402,10 @@ namespace netpp {
 
     bool is_server() const { return false; }
 
-    bool is_ready(EPipeOperation op) const override { return m_connected && !is_busy(op); }
+    bool is_ready(EPipeOperation op) const override {
+      if (op == EPipeOperation::E_CLOSE) { return m_connected; }
+      else { return m_connected && !is_busy(op); }
+    }
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
@@ -577,14 +628,20 @@ namespace netpp {
       return false;
     }
 
-    bool bind_and_listen(const char* addr, uint32_t backlog) override {
+    bool bind(const char* addr) override {
+      return false;
+    }
+
+    bool listen(uint32_t backlog) override {
       return false;
     }
 
     bool connect(uint64_t timeout, const NetworkFlowSpec* recv_flowspec, const NetworkFlowSpec* send_flowspec) override {
+#if CLIENT_UDP_CONNECTIONLESS
       if (m_protocol == ETransportLayerProtocol::E_UDP) {
         return false;
       }
+#endif
 
 #if CLIENT_USE_WSA
       // Check if the connection is still alive
@@ -745,8 +802,11 @@ namespace netpp {
         }
         else if (err != 0) {
           set_transferred(EPipeOperation::E_RECV, -1);
-          error(ESocketErrorReason::E_REASON_SEND);
-          m_recv_buffer->State = EIOState::E_ERROR;
+          if (err != WSAECONNRESET) {
+            error(ESocketErrorReason::E_REASON_RECV);
+            m_recv_buffer->State = EIOState::E_ERROR;
+          }
+          close();
           return -1;
         }
       }
@@ -761,14 +821,16 @@ namespace netpp {
 
       using namespace std::chrono;
 
-      int32_t sent_size = 0;
+      uint32_t sent_size = 0;
 
       while (sent_size < size) {
-        int32_t chunk_size = min(size - sent_size, send_buf_size());
+        int32_t chunk_size = std::min(size - sent_size, send_buf_size());
         memcpy_s(m_send_buffer->buf, send_buf_size(), data + sent_size, chunk_size);
         m_send_buffer->len = chunk_size;
 
         uint32_t flags_ = flags ? *flags : 0;
+        flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
+        flags_ &= (uint32_t)~ESendFlags::E_PARTIAL_IO;
 
 #if CLIENT_USE_WSA
         int rc = ::WSASend(m_socket, m_send_buffer, 1, NULL, flags_, m_send_overlapped, NULL);
@@ -785,7 +847,10 @@ namespace netpp {
               m_send_buffer->State = EIOState::E_PARTIAL;
               return sent_size;
             }
+            set_transferred(EPipeOperation::E_SEND, -1);
             error(ESocketErrorReason::E_REASON_SEND);
+            m_recv_buffer->State = EIOState::E_ERROR;
+            close();
             return -1;
           }
         }
@@ -794,12 +859,12 @@ namespace netpp {
       }
 
       if (m_send_buffer->State == EIOState::E_ASYNC) {
-        return sent_size;
+        return (int32_t)sent_size;
       }
 
       m_send_buffer->State = EIOState::E_COMPLETE;
       m_send_buffer->IsBusy = FALSE;
-      return sent_size;
+      return (int32_t)sent_size;
 #else
         switch (m_protocol) {
         case ETransportLayerProtocol::E_TCP: {
@@ -870,10 +935,10 @@ namespace netpp {
       void set_transferred(EPipeOperation op, int64_t transferred) {
         switch (op) {
         case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
+          m_recv_transferred = (uint32_t)transferred;
           break;
         case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
+          m_send_transferred = (uint32_t)transferred;
           break;
         default:
           break;
@@ -1363,7 +1428,7 @@ namespace netpp {
         return true;
       }
 
-      bool bind_and_listen(const char* addr, uint32_t backlog) override {
+      bool bind(const char* addr) override {
         sockaddr_in server_addr;
         ::ZeroMemory(&server_addr, sizeof(server_addr));
 
@@ -1379,6 +1444,14 @@ namespace netpp {
 
         if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
           error(ESocketErrorReason::E_REASON_BIND);
+          return false;
+        }
+
+        return true;
+      }
+
+      bool listen(uint32_t backlog) override {
+        if (m_protocol == ETransportLayerProtocol::E_UDP) {
           return false;
         }
 
@@ -1421,16 +1494,18 @@ namespace netpp {
 
         char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
         uint32_t block_size = m_send_allocator->block_size();
-        int32_t bytes_sent = 0;
+        uint32_t bytes_sent = 0;
+
+        uint32_t flags_ = flags ? *flags : 0;
+        flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
+        flags_ &= (uint32_t)~ESendFlags::E_PARTIAL_IO;
 
         while (bytes_sent < size) {
-          uint32_t chunk_size = min(size - bytes_sent, block_size);
+          uint32_t chunk_size = std::min(size - bytes_sent, block_size);
           memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
           m_send_buffer->Length = (ULONG)chunk_size;
 
-          uint32_t flags_ = flags ? *flags : 0;
-
-          BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_ & ~IO_FLAG_PARTIAL, m_send_buffer);
+          BOOL rc = s_rio->RIOSend(m_request_queue, m_send_buffer, 1, flags_, m_send_buffer);
           if (rc) {
             m_send_buffer->IsBusy = TRUE;
             bytes_sent += chunk_size;
@@ -1443,11 +1518,11 @@ namespace netpp {
           }
 
           m_send_buffer->State = EIOState::E_PARTIAL;
-          return bytes_sent;
+          return (int32_t)bytes_sent;
         }
 
         m_send_buffer->State = EIOState::E_COMPLETE;
-        return bytes_sent;
+        return (int32_t)bytes_sent;
       }
 
       char* recv_buf() const override {
@@ -1485,10 +1560,10 @@ namespace netpp {
       void set_transferred(EPipeOperation op, int64_t transferred) {
         switch (op) {
         case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
+          m_recv_transferred = (uint32_t)transferred;
           break;
         case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
+          m_send_transferred = (uint32_t)transferred;
           break;
         default:
           break;

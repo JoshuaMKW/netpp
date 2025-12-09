@@ -7,6 +7,8 @@ project(Chatroom VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+find_package(OpenSSL REQUIRED)
+
 # ----------------
 # ChatServer
 # ----------------
@@ -24,6 +26,9 @@ target_include_directories(ChatServer PRIVATE
 
 target_link_directories(ChatServer PRIVATE ${CMAKE_BINARY_DIR}/Application)
 
+target_link_libraries(ChatServer PRIVATE OpenSSL::SSL)
+target_link_libraries(ChatServer PRIVATE OpenSSL::Crypto)
+
 # Link libraries
 target_link_libraries(ChatServer PRIVATE
     netpp
@@ -32,8 +37,8 @@ target_link_libraries(ChatServer PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(ChatServer PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_STATIC>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
 )
 
 # Set output directories
@@ -58,11 +63,14 @@ add_executable(ChatClient
 
 # Include directories
 target_include_directories(ChatClient PRIVATE
-    ${CMAKE_SOURCE_DIR}/netpp
-    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
+    ${CMAKE_CURRENT_SOURCE_DIR}../../netpp
+    ${CMAKE_CURRENT_SOURCE_DIR}../../vcpkg_installed/x64-windows/include
 )
 
 target_link_directories(ChatClient PRIVATE ${CMAKE_BINARY_DIR}/Application)
+
+target_link_libraries(ChatClient PRIVATE OpenSSL::SSL)
+target_link_libraries(ChatClient PRIVATE OpenSSL::Crypto)
 
 # Link libraries
 target_link_libraries(ChatClient PRIVATE
@@ -72,8 +80,8 @@ target_link_libraries(ChatClient PRIVATE
 
 # Add preprocessor definitions
 target_compile_definitions(ChatClient PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_STATIC>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;>
 )
 
 # Set output directories

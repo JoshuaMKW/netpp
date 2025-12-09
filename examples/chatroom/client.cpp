@@ -1,8 +1,19 @@
+// **************************************************************
+// * netpp C++ Networking Library (chatroom example)
+// * Copyright (C) 2024-2025 Joshua Alston
+// *
+// * This program is free software; you can redistribute it and/or
+// * modify it under the terms of the GNU General Public License
+// * as published by the Free Software Foundation; either version 2
+// * of the License, or (at your option) any later version.
+// **************************************************************
+
 #include <iostream>
 
 #include "client.h"
 #include "socket.h"
-#include "tls/controller.h"
+#include "http/router.h"
+#include "tls/security.h"
 
 #include "common.h"
 #include "inputhandler.h"
@@ -74,9 +85,23 @@ int main(int argc, char** argv) {
   std::getline(std::cin, client_name);
 
 #if SERVER_USE_TLS
-  TLSSecurityController* security = new TLSSecurityController(SERVER_KEY, SERVER_CERT, "", "localhost", "");
+  if (!std::filesystem::exists(SERVER_CERT) && !std::filesystem::exists(SERVER_KEY)) {
+    std::filesystem::create_directories(std::filesystem::path(SERVER_CERT).parent_path());
+    std::filesystem::create_directories(std::filesystem::path(SERVER_KEY).parent_path());
+    if (!netpp::generate_client_key_rsa_2048(
+      SERVER_KEY,
+      SERVER_CERT,
+      "US",
+      "NetPP Chatroom")) {
+      fprintf(stderr, "Failed to generate self-signed certificate\n");
+      return 1;
+    }
+  }
+
+  TLSSecurityFactory* security
+    = new TLSSecurityFactory(false, SERVER_KEY, "", "", "localhost", "", ETLSVerifyFlags::VERIFY_PEER);
 #else
-  TLSSecurityController* security = nullptr;
+  TLSSecurityFactory* security = nullptr;
 #endif
 
   TCP_Client client(security);
@@ -160,8 +185,8 @@ int main(int argc, char** argv) {
   }
 
   request->set_version("1.1");
-  request->add_header("Host: " + client.server_hostname());
-  request->add_header("Connection: keep-alive");
+  request->set_header("Host: " + client.server_hostname());
+  request->set_header("Connection: keep-alive");
   request->set_path("/history");
   if (!client.send(request)) {
     fprintf(stderr, "Failed to send HTTP request\n");
