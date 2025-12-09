@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
 #if CLIENT_USE_TLS
   if (!std::filesystem::exists(CLIENT_KEY)) {
     std::filesystem::create_directories(std::filesystem::path(CLIENT_KEY).parent_path());
-    if (!netpp::generate_client_key_rsa_2048(
+    if (!netpp::generate_client_key_rsa_4096(
       CLIENT_KEY,
       "",
       "US",
