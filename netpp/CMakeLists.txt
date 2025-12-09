@@ -53,7 +53,7 @@ add_library(netpp STATIC
     dtls/dtls_bio.h
     dtls/dtls_bio.cpp
     dtls/cookie.h
- "http/headers.h" "http/headers.cpp")
+ "http/headers.h" "http/headers.cpp" "http/protocol.cpp")
 
 # Include directories
 target_include_directories(netpp PUBLIC 
@@ -77,8 +77,8 @@ endif()
 
 # Add preprocessor definitions
 target_compile_definitions(netpp PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN>
-    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN>
+    $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;NOMINMAX>
+    $<$<CONFIG:Release>:NDEBUG;_CONSOLE;WIN32_LEAN_AND_MEAN;NOMINMAX>
 )
 
 if (NETPP_SKIP_TLS_CERT_VERIFY)

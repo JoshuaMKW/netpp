@@ -27,7 +27,7 @@ inline TV RoundUp(TV Value, TM Multiple)
 
 namespace netpp {
 
-  TCP_Client::TCP_Client(ISecurityFactory *security, uint32_t desired_bufsize)
+  TCP_Client::TCP_Client(ISecurityFactory* security, uint32_t desired_bufsize)
     : m_recv_spec(), m_send_spec(), m_handshake_done(false), m_handshake_state(EAuthState::E_NONE), m_security(security) {
     if (security) {
       ETransportProtocolFlags transports = m_security->supported_transports();
@@ -343,6 +343,7 @@ namespace netpp {
         EIOState state = server_pipe->recv(0, nullptr, nullptr);
         if (state == EIOState::E_ERROR) {
           server_pipe->error(ESocketErrorReason::E_REASON_RECV);
+          server_pipe->close();
           return 0;
         }
       }
@@ -350,11 +351,13 @@ namespace netpp {
       ISocketIOResult* sock_results = server_pipe->wait_results();
       if (!sock_results) {
         server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+        server_pipe->close();
         return 0;
       }
 
       if (!sock_results->is_valid()) {
         server_pipe->error(ESocketErrorReason::E_REASON_CORRUPT);
+        server_pipe->close();
         delete sock_results;
         return 0;
       }
@@ -426,6 +429,11 @@ namespace netpp {
       return nullptr;
     }
 
+    if (proc_state == EProcState::E_FIN_PROCESSED) {
+      pipe->close();
+      return nullptr;
+    }
+
     if (recv_digested > 0) {
       data.m_recv_buf_size -= recv_digested;
       memmove_s(data.m_recv_buf, data.m_recv_buf_size, data.m_recv_buf + recv_digested, data.m_recv_buf_size);
@@ -463,13 +471,19 @@ namespace netpp {
       // determined and preallocated. So we just use
       // that calculation.
       // ---
-      proc_buf = data.m_proc_buf;
+      proc_buf = (char*)realloc(data.m_proc_buf, data.m_bytes_processed + proc_size);
+      if (proc_buf) {
+        data.m_proc_buf = proc_buf;
+      }
     }
 
     // Update the processed marker so the next pass is correctly offset...
     // ---
     const uint32_t cur_processed = data.m_bytes_processed + proc_size;
     memcpy_s(proc_buf + data.m_bytes_processed, proc_size, proc_out, proc_size);
+
+    free((void*)proc_out);
+    proc_out = nullptr;
 
     // Then we attempt to identify what kind of data is coming in from
     // the socket... this is done after decryption so we can identify
@@ -479,8 +493,8 @@ namespace netpp {
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
-    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
-      data.m_bytes_total = adapter->calc_size(proc_buf, cur_processed);
+    if (!data.m_proc_until_closed) {
+      data.m_bytes_total = cur_processed;
       data.m_proc_until_closed = data.m_bytes_total == 0;
     }
 
@@ -496,24 +510,16 @@ namespace netpp {
       return nullptr;
     }
 
+    const bool wants_more_data = data.m_proc_until_closed || adapter->wants_more_data(
+      proc_buf,
+      cur_processed
+    );
+
     // Under the condition that the transferred data estimate doesn't
     // the total expected data, we go ahead and resize the
     // buffer to be the total bytes for the upcoming reads...
     // ---
-    if (data.m_proc_until_closed) {
-      char* new_proc_buf = (char*)realloc(data.m_proc_buf, cur_processed);
-      if (new_proc_buf) {
-        if (!data.m_proc_buf) {
-          memcpy_s(
-            new_proc_buf,
-            data.m_bytes_processed,
-            proc_buf,
-            data.m_bytes_processed
-          );
-        }
-        data.m_proc_buf = new_proc_buf;
-      }
-    } else if (!data.m_proc_buf) {
+    if (!data.m_proc_buf) {
       if (data.m_bytes_total > proc_size) {
         char* new_proc_buf = (char*)malloc(data.m_bytes_total);
         memcpy_s(
@@ -531,10 +537,10 @@ namespace netpp {
     }
 
     data.m_bytes_processed = cur_processed;
-    
+
 
     // Initiate the next read...
-    if (data.m_proc_until_closed || data.m_bytes_processed < data.m_bytes_total) {
+    if (wants_more_data /*|| data.m_bytes_processed < data.m_bytes_total*/) {
       uint32_t flags = 0;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;
@@ -552,7 +558,13 @@ namespace netpp {
 
     switch (info.m_operation) {
     case EPipeOperation::E_RECV: {
-      pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+      if (info.m_bytes_transferred == 0) {
+        pipe->close();
+        return false;
+      }
+      else {
+        pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
+      }
       break;
     }
     case EPipeOperation::E_SEND: {
@@ -612,11 +624,23 @@ namespace netpp {
 
     switch (info.m_operation) {
     case EPipeOperation::E_RECV: {
+      // The connection has been closed by the server
+      if (info.m_bytes_transferred == 0) {
+        pipe->close();
+        return false;
+      }
+
       // Process the incoming and possibly incomplete
       // data packet.
       // ---
       bool inproc = false;
       IApplicationLayerAdapter* adapter = handle_inproc_recv(data, info, inproc);
+
+      // In this circumstance the socket was closed by the peer
+      // ---
+      if (!pipe->is_ready(netpp::EPipeOperation::E_CLOSE)) {
+        return false;
+      }
 
       // Finalize the low-level state of the pipe.
       // ---

@@ -318,7 +318,7 @@ namespace netpp {
       return ESecurityState::E_WANTS_DATA;
     }
 
-    m_digested_by_crypt = rsize;
+    m_digested_by_crypt = (uint32_t)rsize;
 
     // 1. Feed new data into OpenSSL (if any)
     if (tls_size > 0) {
@@ -330,12 +330,12 @@ namespace netpp {
 
     char* decrypt_out = static_cast<char*>(malloc(wsize));
 
-    size_t total_decrypted = 0;
-    size_t total_processed_delta = 0;
-    int beg_proc_read = BIO_number_read(m_in_bio);
+    uint32_t total_decrypted = 0;
+    uint32_t total_processed_delta = 0;
+    uint64_t beg_proc_read = BIO_number_read(m_in_bio);
 
     while (rsize - total_processed_delta > 0) {
-      int ret_val = SSL_read(m_ssl, decrypt_out + total_decrypted, rsize - total_decrypted);
+      int ret_val = SSL_read(m_ssl, decrypt_out + total_decrypted, (int)(rsize - total_decrypted));
 
       if (ret_val > 0) {
         total_processed_delta = BIO_number_read(m_in_bio) - beg_proc_read;
@@ -351,14 +351,14 @@ namespace netpp {
 
         // Case B: Peer closed connection gracefully (EOF)
         if (ssl_err == SSL_ERROR_ZERO_RETURN) {
-          break;
+          return ESecurityState::E_FIN_PROCESSED;
         }
 
         // Case C: Actual Fatal Error
         unsigned long err = ERR_get_error();
         // If checking syscall error, sometimes queue is empty, meaning EOF/Connection Reset
         if (ssl_err == SSL_ERROR_SYSCALL && err == 0) {
-          break; // Treat as dirty EOF
+          return ESecurityState::E_FIN_PROCESSED; // Treat as dirty EOF
         }
 
         fprintf(stderr, "OpenSSL Fatal error: %s\n", ERR_error_string(err, nullptr));
@@ -424,7 +424,7 @@ namespace netpp {
     char* tls_out = new char[send_buf_size];
 
     int pending = (int)BIO_ctrl_pending(m_out_bio);
-    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, (int)send_buf_size));
+    int bytes_to_send = BIO_read(m_out_bio, tls_out, std::min(pending, (int)send_buf_size));
     if (bytes_to_send > 0) {
       if (pipe->is_busy(EPipeOperation::E_SEND)) {
         return EProcState::E_WAITING;

@@ -13,96 +13,16 @@ namespace netpp {
     return false;
   }
 
-  uint32_t DNS_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+  uint32_t DNS_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
     return 0;
   }
 
-  uint32_t DNS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+  uint32_t DNS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
     return 0;
   }
 
-  bool HTTP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
-    if (HTTP_Request::is_http_request(data, size)) {
-      HTTP_Request* request = HTTP_Request::create(data, size);
-      if (!request) {
-        return false;
-      }
-
-      const HTTP_Response* response = pipe->signal_http_request(request);
-      if (response) {
-        pipe->send(response); 
-        delete response;
-      }
-
-      delete request;
-      return true;
-    }
-
-    if (HTTP_Response::is_http_response(data, size)) {
-      HTTP_Response* response = HTTP_Response::create(data, size);
-      if (!response) {
-        return false;
-      }
-
-      const HTTP_Request* request = pipe->signal_http_response(response);
-      if (request) {
-        pipe->send(request);
-        delete request;
-      }
-
-      delete response;
-      return true;
-    }
-
+  bool DNS_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
     return false;
-  }
-
-  uint32_t HTTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
-    if (const char* h_end = HTTP_Request::header_end(data, size)) {
-      uint32_t content_length = HTTP_Request::content_length(data, size);
-      return ((uint32_t)(h_end - data) + 4) + content_length;
-    }
-
-    if (const char* h_end = HTTP_Response::header_end(data, size)) {
-      EHTTP_TransferEncoding transfer_encoding = HTTP_Response::transfer_encoding(data, size);
-      switch (transfer_encoding) {
-      case EHTTP_TransferEncoding::E_CHUNKED:
-        // Cannot determine size with chunked encoding
-        return size;
-      case EHTTP_TransferEncoding::E_COMPRESS:
-      case EHTTP_TransferEncoding::E_DEFLATE:
-      case EHTTP_TransferEncoding::E_GZIP:
-        // Cannot determine size with compressed encoding
-        return size;
-      default:
-        break;
-      }
-
-      EHTTP_ContentEncoding content_encoding = HTTP_Response::content_encoding(data, size);
-      switch (content_encoding) {
-      case EHTTP_ContentEncoding::E_BR:
-      case EHTTP_ContentEncoding::E_COMPRESS:
-      case EHTTP_ContentEncoding::E_DCB:
-      case EHTTP_ContentEncoding::E_DCZ:
-      case EHTTP_ContentEncoding::E_GZIP:
-      case EHTTP_ContentEncoding::E_ZSTD:
-        // Cannot determine size with compressed encoding
-        return size;
-      default:
-        break;
-      }
-
-      uint32_t content_length = HTTP_Response::content_length(data, size);
-      if (content_length == std::numeric_limits<uint32_t>::max()) {
-        return 0;
-      }
-      return ((uint32_t)(h_end - data) + 4) + content_length;
-    }
-    return 0;
-  }
-
-  uint32_t HTTP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
-    return calc_size(data, size);
   }
 
   bool RAW_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
@@ -121,48 +41,64 @@ namespace netpp {
     return true;
   }
 
-  uint32_t RAW_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+  uint32_t RAW_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
     return size >= 4 ? *(uint32_t*)data + 4 : 0;
   }
 
-  uint32_t RAW_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+  uint32_t RAW_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
     return calc_size(data, size);
+  }
+
+  bool RAW_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
+    return false;
   }
 
   bool RTP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  uint32_t RTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+  uint32_t RTP_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
     return 0;
   }
 
-  uint32_t RTP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+  uint32_t RTP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
     return 0;
+  }
+
+  bool RTP_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
+    return false;
   }
 
   bool RTCP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  uint32_t RTCP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+  uint32_t RTCP_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
     return 0;
   }
 
-  uint32_t RTCP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+  uint32_t RTCP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
     return 0;
+  }
+
+  bool RTCP_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
+    return false;
   }
 
   bool SIP_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     return false;
   }
 
-  uint32_t SIP_ApplicationAdapter::calc_size(const char* data, uint32_t size) {
+  uint32_t SIP_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
     return 0;
   }
 
-  uint32_t SIP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) {
+  uint32_t SIP_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
     return 0;
+  }
+
+  bool SIP_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
+    return false;
   }
 
   IApplicationLayerAdapter* ApplicationAdapterFactory::create(EApplicationLayerProtocol protocol) {

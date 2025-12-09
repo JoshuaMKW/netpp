@@ -1,3 +1,13 @@
+// **************************************************************
+// * netpp C++ Networking Library (chatroom example)
+// * Copyright (C) 2024-2025 Joshua Alston
+// *
+// * This program is free software; you can redistribute it and/or
+// * modify it under the terms of the GNU General Public License
+// * as published by the Free Software Foundation; either version 2
+// * of the License, or (at your option) any later version.
+// **************************************************************
+
 #include <iostream>
 
 #include "client.h"
@@ -175,8 +185,8 @@ int main(int argc, char** argv) {
   }
 
   request->set_version("1.1");
-  request->add_header("Host: " + client.server_hostname());
-  request->add_header("Connection: keep-alive");
+  request->set_header("Host: " + client.server_hostname());
+  request->set_header("Connection: keep-alive");
   request->set_path("/history");
   if (!client.send(request)) {
     fprintf(stderr, "Failed to send HTTP request\n");

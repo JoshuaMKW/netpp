@@ -48,8 +48,10 @@ namespace netpp {
 
     // Calculate the total size of the application layer packet
     // when this is 0, assume to read until the end of the stream.
-    virtual uint32_t calc_size(const char* data, uint32_t size) = 0;
-    virtual uint32_t calc_proc_size(const char* data, uint32_t size) = 0;
+    virtual uint32_t calc_size(const char* data, uint32_t size) const = 0;
+    virtual uint32_t calc_proc_size(const char* data, uint32_t size) const = 0;
+
+    virtual bool wants_more_data(const char* data, uint32_t size) const = 0;
   };
 
   class NETPP_API DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -58,8 +60,9 @@ namespace netpp {
     ~DNS_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API HTTP_ApplicationAdapter : public IApplicationLayerAdapter {
@@ -68,8 +71,9 @@ namespace netpp {
     ~HTTP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API HTTPS_ApplicationAdapter final : public HTTP_ApplicationAdapter {
@@ -84,8 +88,9 @@ namespace netpp {
     ~RAW_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API RTP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -94,8 +99,9 @@ namespace netpp {
     ~RTP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API RTCP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -104,8 +110,9 @@ namespace netpp {
     ~RTCP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API SIP_ApplicationAdapter final : public IApplicationLayerAdapter {
@@ -114,8 +121,9 @@ namespace netpp {
     ~SIP_ApplicationAdapter() override = default;
 
     bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
-    uint32_t calc_size(const char* data, uint32_t size) override;
-    uint32_t calc_proc_size(const char* data, uint32_t size) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
   };
 
   class NETPP_API ApplicationAdapterFactory {

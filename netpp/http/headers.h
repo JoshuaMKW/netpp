@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace netpp {
 
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Encoding
@@ -26,5 +28,7 @@ namespace netpp {
   EHTTP_TransferEncoding http_transfer_encoding_from_str(const char* str);
   const char* http_content_encoding_to_str(EHTTP_ContentEncoding encoding);
   const char* http_transfer_encoding_to_str(EHTTP_TransferEncoding encoding);
+
+  bool http_get_hostname_and_path_from_str(const char* str, char* hostname, uint32_t hostname_maxlen, char* path, uint32_t path_maxlen);
 
 }

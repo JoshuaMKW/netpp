@@ -111,6 +111,7 @@ namespace netpp {
     bool is_http = false;
 
     // Attempt to trim leading whitespace
+    const char* beg = http_buf;
     const char* end = http_buf + buflen;
     if (http_buf[0] == ' ' || http_buf[0] == '\t' || http_buf[0] == '\n') {
       const char* ltrim = next_token(http_buf, end);
@@ -156,23 +157,38 @@ namespace netpp {
     bool parsing_body = false;
     int content_length_int = 0;
 
+    EHTTP_TransferEncoding transfer_enc = EHTTP_TransferEncoding::E_NONE;
+
+    // TODO: Process Content-Encoding and Transfer-Encoding headers
     while (http_buf < end) {
       const char* line_end = end_line(http_buf, end);
       std::string header = std::string(http_buf, line_end);
 
-      if (header.substr(0, 14) == "Content-Length") {
-        const char* content_length = http_buf + 16;
-        const char* end_content_length = end_token(content_length, line_end);
+      if (strncmp(header.c_str(), "Transfer-Encoding", 17) == 0) {
+        const char* transfer_enc_ptr = http_buf + 19;
+        const char* end_transfer_enc_ptr = end_token(transfer_enc_ptr, line_end);
 
-        std::string content_length_str(content_length, end_content_length);
-        content_length_int = std::stoi(content_length_str);
-        if (content_length_int > 0) {
-          has_body = true;
+        std::string transfer_enc_str(transfer_enc_ptr, end_transfer_enc_ptr);
+        transfer_enc = http_transfer_encoding_from_str(transfer_enc_str.c_str());
+      }
+
+      if (header.substr(0, 14) == "Content-Length") {
+        if (transfer_enc != EHTTP_TransferEncoding::E_NONE) {
+          fprintf_s(stdout, "netpp: [WARNING] Encountered Content-Length header when Transfer-Encoding was specified! Ignoring Content-Length...");
+        } else {
+          const char* content_length = http_buf + 16;
+          const char* end_content_length = end_token(content_length, line_end);
+
+          std::string content_length_str(content_length, end_content_length);
+          content_length_int = std::stoi(content_length_str);
+          if (content_length_int > 0) {
+            has_body = true;
+          }
         }
       }
 
       // Continue parsing headers
-      response->add_header(header);
+      response->set_header(header);
 
       bool is_body_sep_next =
         (line_end[0] == '\n' && line_end[1] == '\n') ||
@@ -181,19 +197,50 @@ namespace netpp {
       http_buf = next_line(http_buf, end);
 
       if (is_body_sep_next) {
-        parsing_body = has_body;
+        parsing_body = has_body || transfer_enc != EHTTP_TransferEncoding::E_NONE;
         break;
       }
     }
 
-    if (parsing_body) {
+    if (!parsing_body) {
+      return response;
+    }
+
+    if (transfer_enc == EHTTP_TransferEncoding::E_NONE) {
       std::string body_str(http_buf, end);
       if (content_length_int != body_str.length()) {
-        fprintf(stderr, "Content-Length does not match body length\n");
+        fprintf(stdout, "netpp: [WARNING] Content-Length does not match body length\n");
         body_str.resize(content_length_int);
       }
 
       response->set_body(body_str);
+    }
+
+    switch (transfer_enc) {
+    case EHTTP_TransferEncoding::E_CHUNKED: {
+      std::string body_str;
+      body_str.reserve(0x8000);
+
+      while (true) {
+        const char* chunk_len_beg = http_buf;
+        const char* chunk_len_end = end_line(chunk_len_beg, end);
+
+        std::string chunk_len_str(chunk_len_beg, chunk_len_end);
+        uint32_t chunk_len = std::stol(chunk_len_str, nullptr, 16);
+
+        printf("[base: 0x%x, ofs: 0x%x] chunk_len: 0x%x\n", (uint32_t)chunk_len_beg, (uint32_t)(chunk_len_beg - HTTP_Response::header_begin(beg, buflen)), chunk_len);
+
+        if (chunk_len == 0) {
+          response->set_body(body_str);
+          break;
+        }
+
+        const char* chunk_beg = chunk_len_end + 2;
+        body_str.append(chunk_beg, chunk_len);
+
+        http_buf = chunk_beg + chunk_len + 2;
+      }
+    }
     }
 
     return response;
@@ -431,7 +478,7 @@ namespace netpp {
     return content_len;
   }
 
-  void HTTP_Response::add_header(const std::string& header) {
+  void HTTP_Response::set_header(const std::string& header) {
     m_headers.push_back(header);
   }
 

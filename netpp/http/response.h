@@ -106,7 +106,7 @@ namespace netpp {
 
     std::string get_header_value(const std::string& header) const;
 
-    void add_header(const std::string& header);
+    void set_header(const std::string& header);
     void set_body(const std::string& body);
 
     bool has_header(const std::string& header) const;

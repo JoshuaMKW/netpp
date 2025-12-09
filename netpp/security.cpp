@@ -2,7 +2,12 @@
 #include <openssl/ssl.h>
 
 #ifdef _WIN32
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+
 #include <Windows.h>
+
 static std::string get_device_serial() {
   char value[255];
   DWORD BufferSize = 255;
@@ -19,8 +24,11 @@ static std::string get_device_serial() {
   }
   return "";
 }
+
 #elif defined(__linux__)
+
 #include <fstream>
+
 static std::string get_device_serial() {
   std::ifstream file("/etc/machine-id");
   if (file.is_open()) {
@@ -31,6 +39,7 @@ static std::string get_device_serial() {
   }
   return "";
 }
+
 #endif
 
 static bool generate_client_key_rsa(

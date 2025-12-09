@@ -31,7 +31,7 @@ static int DTLS_CookieVerifyCallback(SSL* ssl_ctx, const unsigned char* cookie, 
 namespace netpp {
 
   DTLSSecurityController::DTLSSecurityController(const DTLSSecurityFactory* factory)
-    : m_factory(factory), m_initialized(false), m_ssl(), m_in_bio(), m_out_bio(), m_dtls_ctx() {}
+    : m_factory(factory), m_client(), m_initialized(false), m_ssl(), m_in_bio(), m_out_bio(), m_dtls_ctx(), m_digested_by_crypt() {}
 
   bool DTLSSecurityController::is_authenticated() const { return m_handshake_state == EAuthState::E_AUTHENTICATED; }
   bool DTLSSecurityController::is_failed() const { return m_handshake_state == EAuthState::E_FAILED; }
@@ -437,7 +437,7 @@ namespace netpp {
     char* tls_out = new char[send_buf_size];
 
     int pending = (int)BIO_ctrl_pending(m_out_bio);
-    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, (int)send_buf_size));
+    int bytes_to_send = BIO_read(m_out_bio, tls_out, std::min(pending, (int)send_buf_size));
     if (bytes_to_send > 0) {
       if (pipe->is_busy(EPipeOperation::E_SEND)) {
         return EProcState::E_WAITING;

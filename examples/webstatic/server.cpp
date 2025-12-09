@@ -1,3 +1,12 @@
+// **************************************************************
+// * netpp C++ Networking Library (webstatic example)
+// * Copyright (C) 2024-2025 Joshua Alston
+// *
+// * This program is free software; you can redistribute it and/or
+// * modify it under the terms of the GNU General Public License
+// * as published by the Free Software Foundation; either version 2
+// * of the License, or (at your option) any later version.
+// **************************************************************
 
 #include <chrono>
 #include <iostream>
@@ -36,8 +45,8 @@ using namespace std::chrono_literals;
 static HTTP_Response* get_response(const std::string& content_type, const std::string& body) {
   HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
   response->set_version("1.1");
-  response->add_header("Content-Type: " + content_type + "; charset=UTF-8");
-  response->add_header("Connection: keep-alive");
+  response->set_header("Content-Type: " + content_type + "; charset=UTF-8");
+  response->set_header("Connection: keep-alive");
   response->set_body(body);
   return response;
 }
@@ -51,8 +60,8 @@ static HTTP_Response* not_found_response() {
 static HTTP_Response* method_not_allowed_response() {
   HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_METHOD_NOT_ALLOWED);
   response->set_version("1.1");
-  response->add_header("Content-Type: text/plain; charset=UTF-8");
-  response->add_header("Connection: keep-alive");
+  response->set_header("Content-Type: text/plain; charset=UTF-8");
+  response->set_header("Connection: keep-alive");
   return response;
 }
 

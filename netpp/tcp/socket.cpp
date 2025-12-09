@@ -346,6 +346,8 @@ namespace netpp {
       return out_size > 0 ? EProcState::E_SUCCEEDED : EProcState::E_WANTS_DATA;
     case ESecurityState::E_WANTS_DATA:
       return EProcState::E_WANTS_DATA;
+    case ESecurityState::E_FIN_PROCESSED:
+      return EProcState::E_FIN_PROCESSED;
     }
   }
 

@@ -26,6 +26,8 @@ namespace netpp {
 
   class NETPP_API HTTP_Request {
   public:
+    using HeaderPair = std::pair<std::string, std::string>;
+
     static bool is_http_request(const char* http_buf, uint32_t buflen);
     static HTTP_Request* create(EHTTP_RequestMethod type);
     static HTTP_Request* create(const char* http_buf, uint32_t buflen);
@@ -47,14 +49,14 @@ namespace netpp {
 
     std::string version() const { return m_version; }
 
-    const std::vector<std::string>& headers() const { return m_headers; }
+    const std::vector<HeaderPair>& headers() const { return m_headers; }
     const std::vector<std::string>& queries() const { return m_queries; }
     std::string body() const { return m_body; }
 
     void set_path(const std::string& path) { m_path = path; }
     void set_version(const std::string& version) { m_version = version; }
+    void set_header(const std::string& header, const std::string& value = "");
 
-    void add_header(const std::string& header);
     void add_query(const std::string& query);
 
     void set_body(const std::string& body);
@@ -78,7 +80,7 @@ namespace netpp {
     EHTTP_RequestMethod m_method = EHTTP_RequestMethod::E_NONE;
     std::string m_path;
     std::string m_version;
-    std::vector<std::string> m_headers;
+    std::vector<HeaderPair> m_headers;
     std::vector<std::string> m_queries;
     std::string m_body;
   };

@@ -24,6 +24,7 @@ namespace netpp {
     E_NONE,
     E_SUCCEEDED,
     E_WANTS_DATA,
+    E_FIN_PROCESSED,
   };
 
   enum class ESecurityProtocol {
