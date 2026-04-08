@@ -27,6 +27,61 @@ struct _WrapperState {
   netpp::ISocketOSSupportLayer::accept_cond_cb m_cond = nullptr;
 };
 
+static SERVICETYPE _NetworkServiceTypeToNative(netpp::EServiceType service_type) {
+    switch (service_type) {
+    case netpp::EServiceType::E_BEST_EFFORT:
+        return SERVICETYPE_BESTEFFORT;
+    case netpp::EServiceType::E_CONTROLLED_LOAD:
+        return SERVICETYPE_CONTROLLEDLOAD;
+    case netpp::EServiceType::E_GUARANTEED:
+        return SERVICETYPE_GUARANTEED;
+    }
+    return SERVICETYPE_NOTRAFFIC;
+}
+
+static netpp::EServiceType _NativeToNetworkServiceType(SERVICETYPE win_type) {
+    switch (win_type) {
+    case SERVICETYPE_BESTEFFORT:
+        return netpp::EServiceType::E_BEST_EFFORT;
+    case SERVICETYPE_CONTROLLEDLOAD:
+        return netpp::EServiceType::E_CONTROLLED_LOAD;
+    case SERVICETYPE_GUARANTEED:
+        return netpp::EServiceType::E_GUARANTEED;
+    }
+    return netpp::EServiceType::E_BEST_EFFORT;
+}
+
+static FLOWSPEC _NetworkFlowSpecToNative(const netpp::NetworkFlowSpec& spec) {
+    FLOWSPEC win_spec;
+    ZeroMemory(&win_spec, sizeof(FLOWSPEC));
+
+    win_spec.DelayVariation = spec.m_jitter_tolerance;
+    win_spec.ServiceType = _NetworkServiceTypeToNative(spec.m_service_type);
+    win_spec.TokenRate = spec.m_token_rate;
+    win_spec.TokenBucketSize = spec.m_token_bucket_size;
+    win_spec.PeakBandwidth = spec.m_peak_bandwidth;
+    win_spec.Latency = spec.m_max_latency;
+    win_spec.MaxSduSize = spec.m_max_sdu_size;
+    win_spec.MinimumPolicedSize = spec.m_min_policed_size;
+
+    return win_spec;
+}
+
+static netpp::NetworkFlowSpec _NativeToNetworkFlowSpec(const FLOWSPEC& win_spec) {
+    netpp::NetworkFlowSpec spec {};
+
+    spec.m_jitter_tolerance = win_spec.DelayVariation;
+    spec.m_service_type = _NativeToNetworkServiceType(win_spec.ServiceType);
+    spec.m_token_rate = win_spec.TokenRate;
+    spec.m_token_bucket_size = win_spec.TokenBucketSize;
+    spec.m_peak_bandwidth = win_spec.PeakBandwidth;
+    spec.m_max_latency = win_spec.Latency;
+    spec.m_max_sdu_size = win_spec.MaxSduSize;
+    spec.m_min_policed_size = win_spec.MinimumPolicedSize;
+
+    return spec;
+}
+
 static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
   LPQOS sqos, LPQOS gqos, LPWSABUF callee_id,
   LPWSABUF callee_data, GROUP FAR* g, DWORD_PTR callback_data) {
@@ -78,32 +133,8 @@ static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
     has_recv = true;
     has_send = true;
 
-    auto qos_to_spec = [](netpp::NetworkFlowSpec& spec, const FLOWSPEC& qos) {
-      spec.m_token_rate = qos.TokenRate;
-      spec.m_token_bucket_size = qos.TokenBucketSize;
-      spec.m_peak_bandwidth = qos.PeakBandwidth;
-      spec.m_max_latency = qos.Latency;
-      spec.m_jitter_tolerance = qos.DelayVariation;
-
-      switch (qos.ServiceType) {
-      default:
-      case SERVICETYPE_BESTEFFORT:
-        spec.m_service_type = netpp::EServiceType::E_BEST_EFFORT;
-        break;
-      case SERVICETYPE_CONTROLLEDLOAD:
-        spec.m_service_type = netpp::EServiceType::E_CONTROLLED_LOAD;
-        break;
-      case SERVICETYPE_GUARANTEED:
-        spec.m_service_type = netpp::EServiceType::E_GUARANTEED;
-        break;
-      }
-
-      spec.m_max_sdu_size = qos.MaxSduSize;
-      spec.m_min_policed_size = qos.MinimumPolicedSize;
-      };
-
-    qos_to_spec(client_recv, sqos->ReceivingFlowspec);
-    qos_to_spec(client_send, sqos->SendingFlowspec);
+    client_recv = _NativeToNetworkFlowSpec(sqos->ReceivingFlowspec);
+    client_send, _NativeToNetworkFlowSpec(sqos->SendingFlowspec);
   }
 
   if (state->m_cond(
@@ -691,21 +722,8 @@ namespace netpp {
 
         bool custom_flowspec = recv_flowspec && send_flowspec;
         if (custom_flowspec) {
-          qos.SendingFlowspec.DelayVariation = send_flowspec->m_jitter_tolerance;
-          qos.SendingFlowspec.ServiceType = (int)send_flowspec->m_service_type;
-          qos.SendingFlowspec.TokenRate = send_flowspec->m_token_rate;
-          qos.SendingFlowspec.TokenBucketSize = send_flowspec->m_token_bucket_size;
-          qos.SendingFlowspec.PeakBandwidth = send_flowspec->m_peak_bandwidth;
-          qos.SendingFlowspec.MaxSduSize = send_flowspec->m_max_sdu_size;
-          qos.SendingFlowspec.MinimumPolicedSize = send_flowspec->m_min_policed_size;
-
-          qos.ReceivingFlowspec.DelayVariation = recv_flowspec->m_jitter_tolerance;
-          qos.ReceivingFlowspec.ServiceType = (int)recv_flowspec->m_service_type;
-          qos.ReceivingFlowspec.TokenRate = recv_flowspec->m_token_rate;
-          qos.ReceivingFlowspec.TokenBucketSize = recv_flowspec->m_token_bucket_size;
-          qos.ReceivingFlowspec.PeakBandwidth = recv_flowspec->m_peak_bandwidth;
-          qos.ReceivingFlowspec.MaxSduSize = recv_flowspec->m_max_sdu_size;
-          qos.ReceivingFlowspec.MinimumPolicedSize = recv_flowspec->m_min_policed_size;
+          qos.SendingFlowspec = _NetworkFlowSpecToNative(*send_flowspec);
+          qos.ReceivingFlowspec = _NetworkFlowSpecToNative(*recv_flowspec);
         }
 
         // TODO: Potentially handle QOS differently here
