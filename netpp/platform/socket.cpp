@@ -724,6 +724,7 @@ namespace netpp {
             else {
               if (rc != WSAEWOULDBLOCK && rc != WSAECONNREFUSED) {
                 error(ESocketErrorReason::E_REASON_LISTEN);
+                return false;
               }
               // Error connecting to the server (server is down?)
               if (time_out) {

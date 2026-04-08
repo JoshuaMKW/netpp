@@ -65,6 +65,9 @@ namespace netpp {
     char m_ipv6[65];
   };
 
+  constexpr size_t IPV4_MAX_SIZE = sizeof(HostIPInfo::m_ipv4);
+  constexpr size_t IPV6_MAX_SIZE = sizeof(HostIPInfo::m_ipv6);
+
   HostIPInfo get_ip_address_info(const char *hostname);
 
 }  // namespace netpp

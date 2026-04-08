@@ -250,15 +250,13 @@ namespace netpp {
     const char* error_str = client_error(error, reason);
 
     if (pipe) {
-      if (pipe == m_server_socket.m_pipe) {
-        fprintf(stderr, "[CLIENT] ERROR: Port %s:%s (SERVER) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), error_str);
-      }
-      else {
-        fprintf(stderr, "[CLIENT] ERROR: Port %s:%s (CLIENT: %llu) failed with reason: %s\n", pipe->hostname().c_str(), pipe->port().c_str(), pipe->socket(), error_str);
-      }
-    }
-    else {
-      fprintf(stderr, "[CLIENT] ERROR: Client (PROCESS) failed with reason: %s\n", error_str);
+        if (pipe == m_server_socket.m_pipe) {
+            fprintf(stderr, "[CLIENT] ERROR: Connected port [%s:%s] - %s\n", pipe->hostname().c_str(), pipe->port().c_str(), error_str);
+        } else {
+            fprintf(stderr, "[CLIENT] ERROR: (%llu) Hosted port [%s:%s] - %s\n", pipe->socket(), pipe->hostname().c_str(), pipe->port().c_str(), error_str);
+        }
+    } else {
+        fprintf(stderr, "[CLIENT] ERROR: Process - %s\n", error_str);
     }
   }
 

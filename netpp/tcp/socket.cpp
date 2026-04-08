@@ -30,6 +30,16 @@ namespace netpp {
   }
 
   bool TCP_Socket::open(const char* hostname, const char* port) {
+    if (!hostname || !port) {
+      error(ESocketErrorReason::E_REASON_CORRUPT);
+      return false;
+    }
+
+    if (strnlen(hostname, IPV4_MAX_SIZE) == 0) {
+      error(ESocketErrorReason::E_REASON_CORRUPT);
+      return false;
+    }
+
     m_host_name = hostname;
     m_port = port;
 

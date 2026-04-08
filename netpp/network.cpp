@@ -63,7 +63,7 @@ namespace netpp {
   
   HostIPInfo get_ip_address_info(const char* hostname) {
     HostIPInfo info = {};
-    get_ip_address(hostname, info.m_ipv4, sizeof(info.m_ipv4), info.m_ipv6, sizeof(info.m_ipv6));
+    get_ip_address(hostname, info.m_ipv4, IPV4_MAX_SIZE, info.m_ipv6, IPV6_MAX_SIZE);
     return info;
   }
 
