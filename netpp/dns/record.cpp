@@ -7,7 +7,22 @@
 
 #include <iostream>
 #include <numbers>
+#include <string>
+
+#include "../netpp.h"
 #include "record.h"
+
+// ------------------------------------
+// See: RFC1035 - 2.3.4.
+// ------------------------------------
+#define DNS_LABEL_OCTET_LIMIT 63
+#define DNS_NAME_OCTET_LIMIT 255
+#define DNS_TTL_LIMIT 4294967295
+#define DNS_UDP_OCTET_LIMIT 512
+// ------------------------------------
+
+#define DNS_UPPER_OCTET(octet_pair) (uint8_t)(octet_pair >> 8)
+#define DNS_LOWER_OCTET(octet_pair) (uint8_t)(octet_pair)
 
 // ------------------------------------
 // See: RFC1035 - 2.3.3.
@@ -25,70 +40,108 @@ static int DNS_StringCompareInsensitive(const std::string& l, const std::string&
   return difference;
 
 }//-------------------
-// RFC1035 - 2.3.1 & 3.1
+// RFC1035 - 2.3.1 & 3.1 & 4.1.4
 // -------------------
-static std::string DNSQuery_GetDomainName(uint8_t* enc_data, uint16_t capacity) {
-  uint8_t token_length = (*enc_data & 0b00111111);
-  bool token_valid = true;
+static std::string DNSQuery_GetDomainName(DNSQuery_MessageHeader* h, uint8_t* enc_data) {
+    std::string result;
+    result.reserve(DNS_NAME_OCTET_LIMIT);
 
-  // Guesstimated reservation to reduce allocations
-  std::string result;
-  result.reserve(capacity);
+    while (result.length() < DNS_NAME_OCTET_LIMIT) {
+        const bool is_compressed = (enc_data[0] & 0b11000000) == 0b11000000;
+        uint8_t token_length = (enc_data[0] & 0b00111111);
 
-  // Build the string accordingly
-  do {
-    result.append((const char*)enc_data, token_length);
-    enc_data += token_length;
-    token_length = (*enc_data++ & 0b00111111);
-    token_valid = token_length > 0;
-    if (token_valid) {
-      result.append(".");
+        if (is_compressed) {
+            // token length and the next byte is the pointer offset in this case
+            uint16_t pointer_offset = (token_length << 8) | (enc_data[1]);
+            enc_data = (uint8_t*)h + pointer_offset;
+            continue;
+        }
+
+        // NULL terminator
+        if (token_length == 0) {
+            break;
+        }
+
+        if (!result.empty()) {
+            result.append(".");
+        }
+
+        result.append((const char*)enc_data, token_length);
+        enc_data += token_length;
     }
-  } while (token_valid && result.length() < capacity);
 
-  return result;
+    return result;
 }
 
-static uint16_t DNSQuery_GetDomainNameLength(uint8_t* enc_data, uint16_t capacity) {
-  uint16_t length = 0;
+static uint8_t DNSQuery_GetDomainNameCompressedSize(uint8_t* enc_data) {
+    uint16_t length = 0;
+    while (length < DNS_NAME_OCTET_LIMIT) {
+        const bool is_compressed = (enc_data[0] & 0b11000000) == 0b11000000;
+        uint8_t token_length = (enc_data[0] & 0b00111111);
 
-  uint8_t* enc_data_end = (uint8_t*)enc_data;
-  while (*enc_data_end != '\0') {
-    enc_data_end += *enc_data_end;
-    if (enc_data_end - enc_data > capacity) {
-      return capacity;
+        if (is_compressed) {
+            length += 2; // compressed pointer is 2 bytes
+            break;
+        }
+
+        length += 1;
+
+        // NULL terminator
+        if (token_length == 0) {
+            break;
+        }
+
+        length += token_length;
+        enc_data += token_length;
     }
-  }
-  return (enc_data_end - enc_data) + 1;
+
+    if (length > DNS_NAME_OCTET_LIMIT) {
+        fprintf(stderr, "Warning: Domain name length exceeds limit, truncating to %d bytes\n", DNS_NAME_OCTET_LIMIT);
+        return DNS_NAME_OCTET_LIMIT;
+    }
+
+    return static_cast<uint8_t>(length);
 }
 
-static std::string DNSQuery_GetCharacterString(uint8_t* enc_data, uint16_t capacity) {
-  uint8_t token_length = (*enc_data & 0b11111111);
+static uint8_t DNSQuery_GetDomainNameLength(DNSQuery_MessageHeader* h, uint8_t* enc_data) {
+    uint16_t length = 0;
+    while (length < DNS_NAME_OCTET_LIMIT) {
+        const bool is_compressed = (enc_data[0] & 0b11000000) == 0b11000000;
+        uint8_t token_length = (enc_data[0] & 0b00111111);
 
-  // Guesstimated reservation to reduce allocations
-  std::string result((const char*)(enc_data + 1),
-    std::min<uint16_t>(token_length, capacity));
+        if (is_compressed) {
+            uint16_t pointer_offset = (token_length << 8) | (enc_data[1]);
+            enc_data = (uint8_t*)h + pointer_offset;
+            continue;
+        }
 
-  return result;
+        // NULL terminator
+        if (token_length == 0) {
+            break;
+        }
+
+        length += token_length;
+        enc_data += token_length;
+    }
+
+    if (length > DNS_NAME_OCTET_LIMIT) {
+        fprintf(stderr, "Warning: Domain name length exceeds limit, truncating to %d bytes\n", DNS_NAME_OCTET_LIMIT);
+        return DNS_NAME_OCTET_LIMIT;
+    }
+
+    return static_cast<uint8_t>(length);
 }
 
-static uint16_t DNSQuery_GetCharacterStringLength(uint8_t* enc_data, uint16_t capacity) {
+static std::string DNSQuery_GetCharacterString(uint8_t* enc_data) {
+  const uint8_t token_length = (*enc_data & 0b11111111); // Is already <= DNS_NAME_OCTET_LIMIT due to the 1 byte length prefix
+  return std::string((const char*)(enc_data + 1), token_length);
+}
+
+static uint16_t DNSQuery_GetCharacterStringLength(uint8_t* enc_data) {
   uint16_t length = *enc_data;
-  return std::min<uint16_t>(length + 1, capacity);
+  return std::min<uint16_t>(length + 1, DNS_NAME_OCTET_LIMIT);
 }
 // -----------------
-
-// ------------------------------------
-// See: RFC1035 - 2.3.4.
-// ------------------------------------
-#define DNS_LABEL_OCTET_LIMIT 63
-#define DNS_NAME_OCTET_LIMIT 255
-#define DNS_TTL_LIMIT 4294967295
-#define DNS_UDP_OCTET_LIMIT 512
-// ------------------------------------
-
-#define DNS_UPPER_OCTET(octet_pair) (uint8_t)(octet_pair >> 8)
-#define DNS_LOWER_OCTET(octet_pair) (uint8_t)(octet_pair)
 
 // RFC1035 - 3.2.2
 enum EDNSQuery_RR_TYPE : uint16_t {
@@ -156,8 +209,8 @@ enum EDNSQuery_RR_QCLASS : uint16_t {
 
 struct DNSQuery_RDATA {};
 
-static std::string DNSQuery_RDATA_GetCNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetCNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata, uint16_t rlen) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 static std::string DNSQuery_RDATA_GetHINFO_CPU(DNSQuery_RDATA* rdata, uint16_t rlen) {
@@ -365,7 +418,7 @@ struct DNSQuery_MessageHeader {
 // RFC 1035 - 4.1.2
 struct DNSQuery_QuestionSection {};
 
-static std::string DNSQuery_Question_GetQNAME(DNSQuery_QuestionSection* q) {
+static std::string DNSQuery_Question_GetQNAME(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
   return DNSQuery_GetDomainName((uint8_t*)q, DNS_NAME_OCTET_LIMIT);
 }
 
