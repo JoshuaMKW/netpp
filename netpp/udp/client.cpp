@@ -80,7 +80,7 @@ namespace netpp {
       controller = m_security->create_controller();
     }
 
-    m_server_socket.m_pipe = new TCP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, controller, ESocketHint::E_CLIENT);
+    m_server_socket.m_pipe = new UDP_Socket(nullptr, &m_recv_allocator, &m_send_allocator, controller, ESocketHint::E_CLIENT);
 
     m_server_socket.m_proc_buf = nullptr;
     m_server_socket.m_bytes_total = 0;

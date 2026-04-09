@@ -842,6 +842,8 @@ namespace netpp {
 
       uint32_t sent_size = 0;
 
+      // TODO: Convert this to a queue system where it waits for IOCP
+      //       before sending more data
       while (sent_size < size) {
         int32_t chunk_size = std::min(size - sent_size, send_buf_size());
         memcpy_s(m_send_buffer->buf, send_buf_size(), data + sent_size, chunk_size);

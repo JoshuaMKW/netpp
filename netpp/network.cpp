@@ -68,16 +68,11 @@ namespace netpp {
   }
 
   RawPacket* RawPacket::create(const char* data, uint32_t size) {
-    if (size <= 4) {
-      return nullptr;
+    if (size == 0) {
+        return nullptr;
     }
 
-    uint32_t true_size = *(uint32_t*)data;
-    if (true_size > 1 * 1000 * 1000 * 1000) {
-      return nullptr;
-    }
-
-    return new RawPacket(data + 4, true_size);
+    return new RawPacket(data, size);
   }
 
   const char* RawPacket::build_buf(const RawPacket& packet) {
