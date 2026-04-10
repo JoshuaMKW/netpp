@@ -209,64 +209,64 @@ enum EDNSQuery_RR_QCLASS : uint16_t {
 
 struct DNSQuery_RDATA {};
 
-static std::string DNSQuery_RDATA_GetCNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata, uint16_t rlen) {
+static std::string DNSQuery_RDATA_GetCNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
   return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
-static std::string DNSQuery_RDATA_GetHINFO_CPU(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetCharacterString((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetHINFO_CPU(DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetCharacterString((uint8_t*)rdata);
 }
 
-static std::string DNSQuery_RDATA_GetHINFO_OS(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static std::string DNSQuery_RDATA_GetHINFO_OS(DNSQuery_RDATA* rdata) {
   uint8_t* hinfo = (uint8_t*)rdata;
-  uint16_t cpu_len = DNSQuery_GetCharacterStringLength(hinfo, rlen);
-  return DNSQuery_GetCharacterString(hinfo + cpu_len, rlen - cpu_len);
+  uint16_t cpu_len = DNSQuery_GetCharacterStringLength(hinfo);
+  return DNSQuery_GetCharacterString(hinfo + cpu_len);
 }
 
 // RFC1035 - 3.3.3 (OBSOLETE)
-static std::string DNSQuery_RDATA_GetMB_MADNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMB_MADNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.4 (OBSOLETE)
-static std::string DNSQuery_RDATA_GetMD_MADNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMD_MADNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+    return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.5 (OBSOLETE)
-static std::string DNSQuery_RDATA_GetMF_MADNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMF_MADNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+    return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.6 (EXPERIMENTAL)
-static std::string DNSQuery_RDATA_GetMG_MGMNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMG_MGMNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+    return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.7 (EXPERIMENTAL)
-static std::string DNSQuery_RDATA_GetMINFO_RMAILBX(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMINFO_RMAILBX(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+    return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
-static std::string DNSQuery_RDATA_GetMINFO_EMAILBX(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static std::string DNSQuery_RDATA_GetMINFO_EMAILBX(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
   uint8_t* minfo = (uint8_t*)rdata;
-  uint16_t cpu_len = DNSQuery_GetDomainNameLength(minfo, rlen);
-  return DNSQuery_GetDomainName(minfo + cpu_len, rlen - cpu_len);
+  uint16_t cpu_len = DNSQuery_GetDomainNameCompressedSize(minfo);
+  return DNSQuery_GetDomainName(h, minfo + cpu_len);
 }
 // -------
 
 // RFC1035 - 3.3.8 (EXPERIMENTAL)
-static std::string DNSQuery_RDATA_GetMR_NEWNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetMR_NEWNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.9
-static uint16_t DNSQuery_RDATA_GetMX_PREFERENCE(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static uint16_t DNSQuery_RDATA_GetMX_PREFERENCE(DNSQuery_RDATA* rdata) {
   return *(uint16_t*)rdata;
 }
 
-static std::string DNSQuery_RDATA_GetMX_EXCHANGE(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata + 2, rlen - 2);
+static std::string DNSQuery_RDATA_GetMX_EXCHANGE(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata + 2);
 }
 // -------
 
@@ -280,65 +280,69 @@ static T* DNSQuery_RDATA_GetNULL_Format(DNSQuery_RDATA* rdata, uint16_t rlen) {
 }
 
 // RFC1035 - 3.3.11
-static std::string DNSQuery_RDATA_GetNS_NSDNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetNS_NSDNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.12
-static std::string DNSQuery_RDATA_GetPTR_PTRDNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetPTR_PTRDNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
 // RFC1035 - 3.3.13
-static std::string DNSQuery_RDATA_GetSOA_MNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetDomainName((uint8_t*)rdata, rlen);
+static std::string DNSQuery_RDATA_GetSOA_MNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)rdata);
 }
 
-static std::string DNSQuery_RDATA_GetSOA_RNAME(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static std::string DNSQuery_RDATA_GetSOA_RNAME(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
   uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  return DNSQuery_GetDomainName(soainfo + mname_len, rlen - mname_len);
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+  return DNSQuery_GetDomainName(h, soainfo + mname_len);
 }
 
 static uint32_t DNSQuery_RDATA_GetSOA_SERIAL(DNSQuery_RDATA* rdata, uint16_t rlen) {
   uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  uint16_t rname_len = DNSQuery_GetDomainNameLength(soainfo + mname_len, rlen - mname_len);
-  return *(uint32_t*)(soainfo + mname_len + rname_len);
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+    uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
+    return *(uint32_t*)(soainfo + mname_len + rname_len);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_REFRESH(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  uint16_t rname_len = DNSQuery_GetDomainNameLength(soainfo + mname_len, rlen - mname_len);
-  return *(uint32_t*)(soainfo + mname_len + rname_len + 4);
+static uint32_t DNSQuery_RDATA_GetSOA_REFRESH(DNSQuery_RDATA* rdata, uint16_t rlen)
+{
+    uint8_t* soainfo = (uint8_t*)rdata;
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+    uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
+    return *(uint32_t*)(soainfo + mname_len + rname_len + 4);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_RETRY(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  uint16_t rname_len = DNSQuery_GetDomainNameLength(soainfo + mname_len, rlen - mname_len);
-  return *(uint32_t*)(soainfo + mname_len + rname_len + 8);
+static uint32_t DNSQuery_RDATA_GetSOA_RETRY(DNSQuery_RDATA* rdata, uint16_t rlen)
+{
+    uint8_t* soainfo = (uint8_t*)rdata;
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+    uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
+    return *(uint32_t*)(soainfo + mname_len + rname_len + 8);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_EXPIRE(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  uint16_t rname_len = DNSQuery_GetDomainNameLength(soainfo + mname_len, rlen - mname_len);
-  return *(uint32_t*)(soainfo + mname_len + rname_len + 12);
+static uint32_t DNSQuery_RDATA_GetSOA_EXPIRE(DNSQuery_RDATA* rdata, uint16_t rlen)
+{
+    uint8_t* soainfo = (uint8_t*)rdata;
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+    uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
+    return *(uint32_t*)(soainfo + mname_len + rname_len + 12);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_MINIMUM(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  uint8_t* soainfo = (uint8_t*)rdata;
-  uint16_t mname_len = DNSQuery_GetDomainNameLength(soainfo, rlen);
-  uint16_t rname_len = DNSQuery_GetDomainNameLength(soainfo + mname_len, rlen - mname_len);
+static uint32_t DNSQuery_RDATA_GetSOA_MINIMUM(DNSQuery_RDATA* rdata, uint16_t rlen)
+{
+    uint8_t* soainfo = (uint8_t*)rdata;
+    uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
+    uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
   return *(uint32_t*)(soainfo + mname_len + rname_len + 16);
 }
 // -------
 
 // RFC1035 - 3.3.14
 static std::string DNSQuery_RDATA_GetTXT_TXTDATA(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetCharacterString((uint8_t*)rdata, rlen);
+  return DNSQuery_GetCharacterString((uint8_t*)rdata);
 }
 
 static uint32_t DNSQuery_RDATA_GetA_ADDRESS(DNSQuery_RDATA* rdata, uint16_t rlen) {
@@ -419,18 +423,18 @@ struct DNSQuery_MessageHeader {
 struct DNSQuery_QuestionSection {};
 
 static std::string DNSQuery_Question_GetQNAME(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
-  return DNSQuery_GetDomainName((uint8_t*)q, DNS_NAME_OCTET_LIMIT);
+  return DNSQuery_GetDomainName(h, (uint8_t*)q);
 }
 
-static EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(DNSQuery_QuestionSection* q) {
+static EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return (EDNSQuery_RR_QTYPE)(*(uint16_t*)(qinfo + qname_len));
 }
 
-static EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(DNSQuery_QuestionSection* q) {
+static EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return (EDNSQuery_RR_QCLASS)(*(uint16_t*)(qinfo + qname_len + 2));
 }
 // ------------------
@@ -438,37 +442,37 @@ static EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(DNSQuery_QuestionSection*
 // RFC 1035 - 4.1.3
 struct DNSQuery_ResourceRecordSection {};
 
-static std::string DNSQuery_ResourceRecord_GetQNAME(DNSQuery_ResourceRecordSection* q) {
-  return DNSQuery_GetDomainName((uint8_t*)q, DNS_NAME_OCTET_LIMIT);
+static std::string DNSQuery_ResourceRecord_GetQNAME(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
+  return DNSQuery_GetDomainName(h, (uint8_t*)q);
 }
 
-static EDNSQuery_RR_TYPE DNSQuery_ResourceRecord_GetTYPE(DNSQuery_ResourceRecordSection* q) {
+static EDNSQuery_RR_TYPE DNSQuery_ResourceRecord_GetTYPE(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return (EDNSQuery_RR_TYPE)(*(uint16_t*)(qinfo + qname_len));
 }
 
-static EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(DNSQuery_ResourceRecordSection* q) {
+static EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return (EDNSQuery_RR_CLASS)(*(uint16_t*)(qinfo + qname_len + 2));
 }
 
-static uint32_t DNSQuery_ResourceRecord_GetTTL(DNSQuery_ResourceRecordSection* q) {
+static uint32_t DNSQuery_ResourceRecord_GetTTL(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return *(uint32_t*)(qinfo + qname_len + 4);
 }
 
-static uint16_t DNSQuery_ResourceRecord_GetRDLENGTH(DNSQuery_ResourceRecordSection* q) {
+static uint16_t DNSQuery_ResourceRecord_GetRDLENGTH(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return *(uint16_t*)(qinfo + qname_len + 8);
 }
 
-static DNSQuery_RDATA* DNSQuery_ResourceRecord_GetRDATA(DNSQuery_ResourceRecordSection* q) {
+static DNSQuery_RDATA* DNSQuery_ResourceRecord_GetRDATA(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameLength(qinfo, DNS_NAME_OCTET_LIMIT);
+  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
   return (DNSQuery_RDATA*)(qinfo + qname_len + 10);
 }
 // ----------------
