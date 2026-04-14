@@ -24,6 +24,28 @@
 #define DNS_UPPER_OCTET(octet_pair) (uint8_t)(octet_pair >> 8)
 #define DNS_LOWER_OCTET(octet_pair) (uint8_t)(octet_pair)
 
+static uint16_t _DNS_ReadUnaligned16(const void* ptr) {
+    uint16_t val;
+    std::memcpy(&val, ptr, sizeof(uint16_t));
+    return NETPP_NETWORK_TO_SYSTEM_ENDIAN(val);
+}
+
+static uint32_t _DNS_ReadUnaligned32(const void* ptr) {
+    uint32_t val;
+    std::memcpy(&val, ptr, sizeof(uint32_t));
+    return NETPP_NETWORK_TO_SYSTEM_ENDIAN(val);
+}
+
+static void _DNS_WriteUnaligned16(void* ptr, uint16_t val) {
+    uint16_t net_val = NETPP_SYSTEM_TO_NETWORK_ENDIAN(val);
+    std::memcpy(ptr, &net_val, sizeof(uint16_t));
+}
+
+static void _DNS_WriteUnaligned32(void* ptr, uint32_t val) {
+    uint32_t net_val = NETPP_SYSTEM_TO_NETWORK_ENDIAN(val);
+    std::memcpy(ptr, &net_val, sizeof(uint32_t));
+}
+
 // ------------------------------------
 // See: RFC1035 - 2.3.3.
 // ------------------------------------
@@ -46,16 +68,25 @@ static std::string DNSQuery_GetDomainName(DNSQuery_MessageHeader* h, uint8_t* en
     std::string result;
     result.reserve(DNS_NAME_OCTET_LIMIT);
 
+    int32_t pointers_chased = 0;
+
     while (result.length() < DNS_NAME_OCTET_LIMIT) {
         const bool is_compressed = (enc_data[0] & 0b11000000) == 0b11000000;
         uint8_t token_length = (enc_data[0] & 0b00111111);
 
         if (is_compressed) {
+            if (pointers_chased >= 10) {
+                break;  // We exit early to avoid malicious attacks
+            }
+
             // token length and the next byte is the pointer offset in this case
             uint16_t pointer_offset = (token_length << 8) | (enc_data[1]);
             enc_data = (uint8_t*)h + pointer_offset;
+            pointers_chased += 1;
             continue;
         }
+
+        enc_data += 1;
 
         // NULL terminator
         if (token_length == 0) {
@@ -84,15 +115,14 @@ static uint8_t DNSQuery_GetDomainNameCompressedSize(uint8_t* enc_data) {
             break;
         }
 
-        length += 1;
-
         // NULL terminator
         if (token_length == 0) {
+            length += 1;
             break;
         }
 
-        length += token_length;
-        enc_data += token_length;
+        length += 1 + token_length;
+        enc_data += 1 + token_length;
     }
 
     if (length > DNS_NAME_OCTET_LIMIT) {
@@ -262,7 +292,7 @@ static std::string DNSQuery_RDATA_GetMR_NEWNAME(DNSQuery_MessageHeader* h, DNSQu
 
 // RFC1035 - 3.3.9
 static uint16_t DNSQuery_RDATA_GetMX_PREFERENCE(DNSQuery_RDATA* rdata) {
-  return *(uint16_t*)rdata;
+  return _DNS_ReadUnaligned16(rdata);
 }
 
 static std::string DNSQuery_RDATA_GetMX_EXCHANGE(DNSQuery_MessageHeader* h, DNSQuery_RDATA* rdata) {
@@ -300,60 +330,63 @@ static std::string DNSQuery_RDATA_GetSOA_RNAME(DNSQuery_MessageHeader* h, DNSQue
   return DNSQuery_GetDomainName(h, soainfo + mname_len);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_SERIAL(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static uint32_t DNSQuery_RDATA_GetSOA_SERIAL(DNSQuery_RDATA* rdata) {
   uint8_t* soainfo = (uint8_t*)rdata;
     uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
     uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
-    return *(uint32_t*)(soainfo + mname_len + rname_len);
+    return _DNS_ReadUnaligned32(soainfo + mname_len + rname_len);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_REFRESH(DNSQuery_RDATA* rdata, uint16_t rlen)
+static uint32_t DNSQuery_RDATA_GetSOA_REFRESH(DNSQuery_RDATA* rdata)
 {
     uint8_t* soainfo = (uint8_t*)rdata;
     uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
     uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
-    return *(uint32_t*)(soainfo + mname_len + rname_len + 4);
+    return _DNS_ReadUnaligned32(soainfo + mname_len + rname_len + 4);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_RETRY(DNSQuery_RDATA* rdata, uint16_t rlen)
+static uint32_t DNSQuery_RDATA_GetSOA_RETRY(DNSQuery_RDATA* rdata)
 {
     uint8_t* soainfo = (uint8_t*)rdata;
     uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
     uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
-    return *(uint32_t*)(soainfo + mname_len + rname_len + 8);
+    return _DNS_ReadUnaligned32(soainfo + mname_len + rname_len + 8);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_EXPIRE(DNSQuery_RDATA* rdata, uint16_t rlen)
+static uint32_t DNSQuery_RDATA_GetSOA_EXPIRE(DNSQuery_RDATA* rdata)
 {
     uint8_t* soainfo = (uint8_t*)rdata;
     uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
     uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
-    return *(uint32_t*)(soainfo + mname_len + rname_len + 12);
+    return _DNS_ReadUnaligned32(soainfo + mname_len + rname_len + 12);
 }
 
-static uint32_t DNSQuery_RDATA_GetSOA_MINIMUM(DNSQuery_RDATA* rdata, uint16_t rlen)
+static uint32_t DNSQuery_RDATA_GetSOA_MINIMUM(DNSQuery_RDATA* rdata)
 {
     uint8_t* soainfo = (uint8_t*)rdata;
     uint16_t mname_len = DNSQuery_GetDomainNameCompressedSize(soainfo);
     uint16_t rname_len = DNSQuery_GetDomainNameCompressedSize(soainfo + mname_len);
-  return *(uint32_t*)(soainfo + mname_len + rname_len + 16);
+    return _DNS_ReadUnaligned32(soainfo + mname_len + rname_len + 16);
 }
 // -------
 
 // RFC1035 - 3.3.14
-static std::string DNSQuery_RDATA_GetTXT_TXTDATA(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return DNSQuery_GetCharacterString((uint8_t*)rdata);
+static std::string DNSQuery_RDATA_GetTXT_TXTDATA(DNSQuery_RDATA* rdata)
+{
+    return DNSQuery_GetCharacterString((uint8_t*)rdata);
 }
 
-static uint32_t DNSQuery_RDATA_GetA_ADDRESS(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return *(uint32_t*)rdata;
+static uint32_t DNSQuery_RDATA_GetA_ADDRESS(DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned32(rdata);
 }
 
-static uint32_t DNSQuery_RDATA_GetWKS_ADDRESS(DNSQuery_RDATA* rdata, uint16_t rlen) {
-  return *(uint32_t*)rdata;
+static uint32_t DNSQuery_RDATA_GetWKS_ADDRESS(DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned32(rdata);
 }
 
-static uint8_t DNSQuery_RDATA_GetWKS_PROTOCOL(DNSQuery_RDATA* rdata, uint16_t rlen) {
+static uint8_t DNSQuery_RDATA_GetWKS_PROTOCOL(DNSQuery_RDATA* rdata) {
   return ((uint8_t*)rdata)[4];
 }
 
@@ -406,7 +439,7 @@ enum class EDNSQuery_ReturnCode {
 #define FLAGS_GET_TRUNCATION(flags) ((bool)((flags & FLAG_TRUNCATION_MASK) >> 9))
 #define FLAGS_GET_RECURSION_DESIRED(flags) ((bool)((flags & FLAG_RECURSION_DESIRED_MASK) >> 8))
 #define FLAGS_GET_RECURSION_AVAILABLE(flags) ((bool)((flags & FLAG_RECURSION_AVAILABLE_MASK) >> 7))
-#define FLAGS_GET_RESERVED(flags) (flags & FLAG_RESERVED_MASK) >> 4)
+#define FLAGS_GET_RESERVED(flags) ((flags & FLAG_RESERVED_MASK) >> 4)
 #define FLAGS_GET_RETURN_CODE(flags) ((EDNSQuery_ReturnCode)((flags & FLAG_RETURN_CODE_MASK) >> 0))
 
 struct DNSQuery_MessageHeader {
@@ -429,13 +462,13 @@ static std::string DNSQuery_Question_GetQNAME(DNSQuery_MessageHeader* h, DNSQuer
 static EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
   uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return (EDNSQuery_RR_QTYPE)(*(uint16_t*)(qinfo + qname_len));
+  return (EDNSQuery_RR_QTYPE)_DNS_ReadUnaligned16(qinfo + qname_len);
 }
 
 static EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(DNSQuery_MessageHeader* h, DNSQuery_QuestionSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
   uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return (EDNSQuery_RR_QCLASS)(*(uint16_t*)(qinfo + qname_len + 2));
+  return (EDNSQuery_RR_QCLASS)_DNS_ReadUnaligned16(qinfo + qname_len + 2);
 }
 // ------------------
 
@@ -449,25 +482,26 @@ static std::string DNSQuery_ResourceRecord_GetQNAME(DNSQuery_MessageHeader* h, D
 static EDNSQuery_RR_TYPE DNSQuery_ResourceRecord_GetTYPE(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
   uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return (EDNSQuery_RR_TYPE)(*(uint16_t*)(qinfo + qname_len));
+  return (EDNSQuery_RR_TYPE)_DNS_ReadUnaligned16(qinfo + qname_len);
 }
 
-static EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
-  uint8_t* qinfo = (uint8_t*)q;
-  uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return (EDNSQuery_RR_CLASS)(*(uint16_t*)(qinfo + qname_len + 2));
+static EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q)
+{
+    uint8_t* qinfo = (uint8_t*)q;
+    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
+    return (EDNSQuery_RR_CLASS)_DNS_ReadUnaligned16(qinfo + qname_len + 2);
 }
 
 static uint32_t DNSQuery_ResourceRecord_GetTTL(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
   uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return *(uint32_t*)(qinfo + qname_len + 4);
+  return _DNS_ReadUnaligned32(qinfo + qname_len + 4);
 }
 
 static uint16_t DNSQuery_ResourceRecord_GetRDLENGTH(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
   uint8_t* qinfo = (uint8_t*)q;
   uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-  return *(uint16_t*)(qinfo + qname_len + 8);
+  return _DNS_ReadUnaligned16(qinfo + qname_len + 8);
 }
 
 static DNSQuery_RDATA* DNSQuery_ResourceRecord_GetRDATA(DNSQuery_MessageHeader* h, DNSQuery_ResourceRecordSection* q) {
