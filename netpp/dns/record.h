@@ -19,6 +19,18 @@ namespace netpp {
         // ...
     };
 
+    class DNS_Authoritative {
+    public:
+        friend class DNS_Message;
+        // ...
+    };
+
+    class DNS_Additional {
+    public:
+        friend class DNS_Message;
+        // ...
+    };
+
     class DNS_Message {
     public:
         DNS_Message() = delete;
@@ -30,6 +42,7 @@ namespace netpp {
 
         static DNS_Message* create_query();
         static DNS_Message* create_response();
+        static DNS_Message* create(const char* dns_buf, int buflen);
 
         static const char* build_buf(const DNS_Message& msg, uint32_t* size_out);
 
