@@ -1,4 +1,7 @@
 #include "protocol.h"
+#include "dns/record.h"
+#include "dns/request.h"
+#include "dns/response.h"
 #include "http/request.h"
 #include "http/response.h"
 #include "socket.h"
@@ -6,7 +9,38 @@
 namespace netpp {
 
   bool DNS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
-    return false;
+      if (DNS_Message::is_data_query(data, size)) {
+          DNS_Message* message = DNS_Message::create(data, size);
+          if (!message) {
+              return false;
+          }
+
+          const DNS_Message* response = pipe->signal_dns_request(message);
+          if (response) {
+              pipe->send(response);
+              delete response;
+          }
+
+          delete message;
+          return true;
+      }
+
+      if (DNS_Message::is_data_response(data, size)) {
+          DNS_Message* message = DNS_Message::create(data, size);
+          if (!message) {
+              return false;
+          }
+
+          const DNS_Message* request = pipe->signal_dns_response(message);
+          if (request) {
+              pipe->send(request);
+              delete request;
+          }
+
+          delete message;
+          return true;
+      }
+      return false;
   }
 
   uint32_t DNS_ApplicationAdapter::calc_size(const char* data, uint32_t size) {

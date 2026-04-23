@@ -20,6 +20,7 @@
 #include "network.h"
 #include "protocol.h"
 #include "security.h"
+#include "dns/record.h"
 #include "http/request.h"
 #include "http/response.h"
 #include "platform/socket.h"
@@ -66,8 +67,8 @@ namespace netpp {
   public:
     using close_cb = std::function<bool(ISocketPipe*)>;
     using error_cb = std::function<bool(ISocketPipe*, ESocketErrorReason reason)>;
-    using dns_request_cb = std::function<DNS_Response* (const ISocketPipe* source, const DNS_Request* request)>;
-    using dns_response_cb = std::function<DNS_Request* (const ISocketPipe* source, const DNS_Response* response)>;
+    using dns_request_cb = std::function<DNS_Message* (const ISocketPipe* source, const DNS_Message* request)>;
+    using dns_response_cb = std::function<DNS_Message* (const ISocketPipe* source, const DNS_Message* response)>;
     using http_request_cb = std::function<HTTP_Response* (const ISocketPipe* source, const HTTP_Request* request)>;
     using http_response_cb = std::function<HTTP_Request* (const ISocketPipe* source, const HTTP_Response* response)>;
     using raw_receive_cb = std::function<RawPacket* (const ISocketPipe* source, const RawPacket* packet)>;
@@ -116,6 +117,7 @@ namespace netpp {
     virtual EIOState send(const char* data, uint32_t size, uint32_t* flags) = 0;
     virtual EIOState send(const HTTP_Request* request) = 0;
     virtual EIOState send(const HTTP_Response* response) = 0;
+    virtual EIOState send(const DNS_Message* message) = 0;
     virtual EIOState send(const RawPacket* packet) = 0;
 
     virtual void on_close(close_cb cb) = 0;
@@ -131,8 +133,8 @@ namespace netpp {
     virtual void on_sip_response(sip_response_cb) = 0;
     virtual void clone_callbacks_from(ISocketPipe* other) = 0;
 
-    virtual const DNS_Response* signal_dns_request(const DNS_Request* request) = 0;
-    virtual const DNS_Request* signal_dns_response(const DNS_Response* response) = 0;
+    virtual const DNS_Message* signal_dns_request(const DNS_Message* request) = 0;
+    virtual const DNS_Message* signal_dns_response(const DNS_Message* response) = 0;
     virtual const HTTP_Response* signal_http_request(const HTTP_Request* request) = 0;
     virtual const HTTP_Request* signal_http_response(const HTTP_Response* response) = 0;
     virtual const RawPacket* signal_raw_receive(const RawPacket* packet) = 0;
@@ -204,6 +206,7 @@ namespace netpp {
     EIOState send(const char* data, uint32_t size, uint32_t* flags) override;
     EIOState send(const HTTP_Request* request) override;
     EIOState send(const HTTP_Response* response) override;
+    EIOState send(const DNS_Message* message) override;
     EIOState send(const RawPacket* packet) override;
 
     void on_close(close_cb cb) override {
@@ -230,8 +233,8 @@ namespace netpp {
     void on_sip_response(sip_response_cb cb) override { m_signal_sip_response = cb; }
     void clone_callbacks_from(ISocketPipe* other) override;
 
-    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_signal_dns_request ? m_signal_dns_request(this, request) : nullptr; }
-    const DNS_Request* signal_dns_response(const DNS_Response* response) override {
+    const DNS_Message* signal_dns_request(const DNS_Message* request) override { return m_signal_dns_request ? m_signal_dns_request(this, request) : nullptr; }
+    const DNS_Message* signal_dns_response(const DNS_Message* response) override {
       return m_signal_dns_response ? m_signal_dns_response(this, response) : nullptr;
     }
     const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_signal_http_request ? m_signal_http_request(this, request) : nullptr; }
@@ -326,7 +329,7 @@ namespace netpp {
     EIOState send(const char* data, uint32_t size, uint32_t* flags) override;
     EIOState send(const HTTP_Request* request) override;
     EIOState send(const HTTP_Response* response) override;
-
+    EIOState send(const DNS_Message* message) override;
     // Application surrenders ownership of the buffer
     EIOState send(const RawPacket* packet) override;
 
@@ -352,8 +355,8 @@ namespace netpp {
     void on_sip_response(sip_response_cb cb) override { m_signal_sip_response = cb; }
     void clone_callbacks_from(ISocketPipe* other) override;
 
-    const DNS_Response* signal_dns_request(const DNS_Request* request) override { return m_signal_dns_request(this, request); }
-    const DNS_Request* signal_dns_response(const DNS_Response* response) override { return m_signal_dns_response(this, response); }
+    const DNS_Message* signal_dns_request(const DNS_Message* request) override { return m_signal_dns_request(this, request); }
+    const DNS_Message* signal_dns_response(const DNS_Message* response) override { return m_signal_dns_response(this, response); }
     const HTTP_Response* signal_http_request(const HTTP_Request* request) override { return m_signal_http_request(this, request); }
     const HTTP_Request* signal_http_response(const HTTP_Response* response) override { return m_signal_http_response(this, response); }
     const RawPacket* signal_raw_receive(const RawPacket* packet) override { return m_signal_raw_receive(this, packet); }

@@ -277,6 +277,12 @@ namespace netpp {
     return send(request_buf, request_buf_size, nullptr);
   }
 
+  EIOState TCP_Socket::send(const DNS_Message* message) {
+    uint32_t message_buf_size = 0;
+    const char* message_buf = DNS_Message::build_buf(*message, &message_buf_size);
+    return send(message_buf, message_buf_size, nullptr);
+  }
+
   EIOState TCP_Socket::send(const RawPacket* packet) {
     const char* packet_buf = RawPacket::build_buf(*packet);
     return send(packet_buf, packet->length() + 4, nullptr);
