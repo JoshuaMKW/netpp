@@ -5,10 +5,10 @@
 #include <iostream>
 #include <thread>
 
-#include "network.h"
-#include "socket.h"
+#include "netpp/network.h"
+#include "netpp/socket.h"
 
-#include "server.h"
+#include "netpp/server.h"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -26,6 +26,61 @@ struct _WrapperState {
   netpp::ISocketOSSupportLayer* m_pipe = nullptr;
   netpp::ISocketOSSupportLayer::accept_cond_cb m_cond = nullptr;
 };
+
+static SERVICETYPE _NetworkServiceTypeToNative(netpp::EServiceType service_type) {
+    switch (service_type) {
+    case netpp::EServiceType::E_BEST_EFFORT:
+        return SERVICETYPE_BESTEFFORT;
+    case netpp::EServiceType::E_CONTROLLED_LOAD:
+        return SERVICETYPE_CONTROLLEDLOAD;
+    case netpp::EServiceType::E_GUARANTEED:
+        return SERVICETYPE_GUARANTEED;
+    }
+    return SERVICETYPE_NOTRAFFIC;
+}
+
+static netpp::EServiceType _NativeToNetworkServiceType(SERVICETYPE win_type) {
+    switch (win_type) {
+    case SERVICETYPE_BESTEFFORT:
+        return netpp::EServiceType::E_BEST_EFFORT;
+    case SERVICETYPE_CONTROLLEDLOAD:
+        return netpp::EServiceType::E_CONTROLLED_LOAD;
+    case SERVICETYPE_GUARANTEED:
+        return netpp::EServiceType::E_GUARANTEED;
+    }
+    return netpp::EServiceType::E_BEST_EFFORT;
+}
+
+static FLOWSPEC _NetworkFlowSpecToNative(const netpp::NetworkFlowSpec& spec) {
+    FLOWSPEC win_spec;
+    ZeroMemory(&win_spec, sizeof(FLOWSPEC));
+
+    win_spec.DelayVariation = spec.m_jitter_tolerance;
+    win_spec.ServiceType = _NetworkServiceTypeToNative(spec.m_service_type);
+    win_spec.TokenRate = spec.m_token_rate;
+    win_spec.TokenBucketSize = spec.m_token_bucket_size;
+    win_spec.PeakBandwidth = spec.m_peak_bandwidth;
+    win_spec.Latency = spec.m_max_latency;
+    win_spec.MaxSduSize = spec.m_max_sdu_size;
+    win_spec.MinimumPolicedSize = spec.m_min_policed_size;
+
+    return win_spec;
+}
+
+static netpp::NetworkFlowSpec _NativeToNetworkFlowSpec(const FLOWSPEC& win_spec) {
+    netpp::NetworkFlowSpec spec {};
+
+    spec.m_jitter_tolerance = win_spec.DelayVariation;
+    spec.m_service_type = _NativeToNetworkServiceType(win_spec.ServiceType);
+    spec.m_token_rate = win_spec.TokenRate;
+    spec.m_token_bucket_size = win_spec.TokenBucketSize;
+    spec.m_peak_bandwidth = win_spec.PeakBandwidth;
+    spec.m_max_latency = win_spec.Latency;
+    spec.m_max_sdu_size = win_spec.MaxSduSize;
+    spec.m_min_policed_size = win_spec.MinimumPolicedSize;
+
+    return spec;
+}
 
 static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
   LPQOS sqos, LPQOS gqos, LPWSABUF callee_id,
@@ -78,32 +133,8 @@ static int _ServerAcceptCondWrapper(LPWSABUF caller_id, LPWSABUF caller_data,
     has_recv = true;
     has_send = true;
 
-    auto qos_to_spec = [](netpp::NetworkFlowSpec& spec, const FLOWSPEC& qos) {
-      spec.m_token_rate = qos.TokenRate;
-      spec.m_token_bucket_size = qos.TokenBucketSize;
-      spec.m_peak_bandwidth = qos.PeakBandwidth;
-      spec.m_max_latency = qos.Latency;
-      spec.m_jitter_tolerance = qos.DelayVariation;
-
-      switch (qos.ServiceType) {
-      default:
-      case SERVICETYPE_BESTEFFORT:
-        spec.m_service_type = netpp::EServiceType::E_BEST_EFFORT;
-        break;
-      case SERVICETYPE_CONTROLLEDLOAD:
-        spec.m_service_type = netpp::EServiceType::E_CONTROLLED_LOAD;
-        break;
-      case SERVICETYPE_GUARANTEED:
-        spec.m_service_type = netpp::EServiceType::E_GUARANTEED;
-        break;
-      }
-
-      spec.m_max_sdu_size = qos.MaxSduSize;
-      spec.m_min_policed_size = qos.MinimumPolicedSize;
-      };
-
-    qos_to_spec(client_recv, sqos->ReceivingFlowspec);
-    qos_to_spec(client_send, sqos->SendingFlowspec);
+    client_recv = _NativeToNetworkFlowSpec(sqos->ReceivingFlowspec);
+    client_send, _NativeToNetworkFlowSpec(sqos->SendingFlowspec);
   }
 
   if (state->m_cond(
@@ -124,11 +155,19 @@ namespace netpp {
   static WSADATA wsa_data;
 
   bool sockets_initialize() {
+    if (wsa_data.iMaxSockets > 0 && wsa_data.wVersion == 2) {
+      return true;
+    }
+
     // Initialize Winsock
     return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
   }
 
   void sockets_deinitialize() {
+    if (wsa_data.iMaxSockets == 0 || wsa_data.wVersion != 2) {
+      return;
+    }
+
     WSACleanup();
   }
 
@@ -152,14 +191,53 @@ namespace netpp {
     E_START,
   };
 
-  RIO_EXTENSION_FUNCTION_TABLE* s_rio;
+  RIO_EXTENSION_FUNCTION_TABLE* s_rio = nullptr;
+  LPFN_WSARECVMSG s_WSARecvMsg = nullptr;
+  LPFN_WSASENDMSG s_WSASendMsg = nullptr;
+
+  static int _win32_init_wsa(SOCKET in_sock) {
+    sockets_initialize();
+
+    DWORD bytes = 0;
+    GUID wsa_recvmsg_guid = WSAID_WSARECVMSG;
+    GUID wsa_sendmsg_guid = WSAID_WSASENDMSG;
+
+    if (s_WSARecvMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSARecvMsg, sizeof(s_WSARecvMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    if (s_WSASendMsg == nullptr && ::WSAIoctl(
+      in_sock,
+      SIO_GET_EXTENSION_FUNCTION_POINTER,
+      &wsa_recvmsg_guid, sizeof(GUID),
+      &s_WSASendMsg, sizeof(s_WSASendMsg),
+      &bytes, NULL, NULL
+    ) != 0) {
+      return WSAGetLastError();
+    }
+
+    return 0;
+  }
+
+  static int _win32_deinit_wsa(SOCKET in_sock) {
+    sockets_deinitialize();
+    s_WSARecvMsg = nullptr;
+    s_WSASendMsg = nullptr;
+    return 0;
+  }
 
   static int _win32_init_rio(SOCKET in_sock) {
     if (s_rio) {
       return 0;
     }
 
-    sockets_initialize();
+    _win32_init_wsa(in_sock);
 
     s_rio = new RIO_EXTENSION_FUNCTION_TABLE();
 
@@ -184,7 +262,7 @@ namespace netpp {
   }
 
   static int _win32_deinit_rio(SOCKET in_sock) {
-    sockets_initialize();
+    _win32_deinit_wsa(in_sock);
 
     if (!s_rio) {
       return 0;
@@ -274,11 +352,11 @@ namespace netpp {
       bool result = true;
 
       if (m_recv_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_RECV, m_recv_bytes, m_socket });
       }
 
       if (m_send_bytes > 0) {
-        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes });
+        result &= cb(m_pipe, { EPipeOperation::E_SEND, m_send_bytes, m_socket });
       }
 
       return result;
@@ -288,6 +366,7 @@ namespace netpp {
     ISocketOSSupportLayer* m_pipe;
     uint32_t m_recv_bytes;
     uint32_t m_send_bytes;
+    uint64_t m_socket;
   };
 
   class Win32ClientSocketLayer : public ISocketOSSupportLayer {
@@ -354,7 +433,10 @@ namespace netpp {
 
     bool is_server() const { return false; }
 
-    bool is_ready(EPipeOperation op) const override { return m_connected && !is_busy(op); }
+    bool is_ready(EPipeOperation op) const override {
+      if (op == EPipeOperation::E_CLOSE) { return m_connected; }
+      else { return m_connected && !is_busy(op); }
+    }
 
     bool is_busy(EPipeOperation op) const override {
       switch (op) {
@@ -577,7 +659,11 @@ namespace netpp {
       return false;
     }
 
-    bool bind_and_listen(const char* addr, uint32_t backlog) override {
+    bool bind(const char* addr) override {
+      return false;
+    }
+
+    bool listen(uint32_t backlog) override {
       return false;
     }
 
@@ -636,21 +722,8 @@ namespace netpp {
 
         bool custom_flowspec = recv_flowspec && send_flowspec;
         if (custom_flowspec) {
-          qos.SendingFlowspec.DelayVariation = send_flowspec->m_jitter_tolerance;
-          qos.SendingFlowspec.ServiceType = (int)send_flowspec->m_service_type;
-          qos.SendingFlowspec.TokenRate = send_flowspec->m_token_rate;
-          qos.SendingFlowspec.TokenBucketSize = send_flowspec->m_token_bucket_size;
-          qos.SendingFlowspec.PeakBandwidth = send_flowspec->m_peak_bandwidth;
-          qos.SendingFlowspec.MaxSduSize = send_flowspec->m_max_sdu_size;
-          qos.SendingFlowspec.MinimumPolicedSize = send_flowspec->m_min_policed_size;
-
-          qos.ReceivingFlowspec.DelayVariation = recv_flowspec->m_jitter_tolerance;
-          qos.ReceivingFlowspec.ServiceType = (int)recv_flowspec->m_service_type;
-          qos.ReceivingFlowspec.TokenRate = recv_flowspec->m_token_rate;
-          qos.ReceivingFlowspec.TokenBucketSize = recv_flowspec->m_token_bucket_size;
-          qos.ReceivingFlowspec.PeakBandwidth = recv_flowspec->m_peak_bandwidth;
-          qos.ReceivingFlowspec.MaxSduSize = recv_flowspec->m_max_sdu_size;
-          qos.ReceivingFlowspec.MinimumPolicedSize = recv_flowspec->m_min_policed_size;
+          qos.SendingFlowspec = _NetworkFlowSpecToNative(*send_flowspec);
+          qos.ReceivingFlowspec = _NetworkFlowSpecToNative(*recv_flowspec);
         }
 
         // TODO: Potentially handle QOS differently here
@@ -669,6 +742,7 @@ namespace netpp {
             else {
               if (rc != WSAEWOULDBLOCK && rc != WSAECONNREFUSED) {
                 error(ESocketErrorReason::E_REASON_LISTEN);
+                return false;
               }
               // Error connecting to the server (server is down?)
               if (time_out) {
@@ -747,8 +821,11 @@ namespace netpp {
         }
         else if (err != 0) {
           set_transferred(EPipeOperation::E_RECV, -1);
-          error(ESocketErrorReason::E_REASON_SEND);
-          m_recv_buffer->State = EIOState::E_ERROR;
+          if (err != WSAECONNRESET) {
+            error(ESocketErrorReason::E_REASON_RECV);
+            m_recv_buffer->State = EIOState::E_ERROR;
+          }
+          close();
           return -1;
         }
       }
@@ -763,10 +840,12 @@ namespace netpp {
 
       using namespace std::chrono;
 
-      int32_t sent_size = 0;
+      uint32_t sent_size = 0;
 
+      // TODO: Convert this to a queue system where it waits for IOCP
+      //       before sending more data
       while (sent_size < size) {
-        int32_t chunk_size = min(size - sent_size, send_buf_size());
+        int32_t chunk_size = std::min(size - sent_size, send_buf_size());
         memcpy_s(m_send_buffer->buf, send_buf_size(), data + sent_size, chunk_size);
         m_send_buffer->len = chunk_size;
 
@@ -789,7 +868,10 @@ namespace netpp {
               m_send_buffer->State = EIOState::E_PARTIAL;
               return sent_size;
             }
+            set_transferred(EPipeOperation::E_SEND, -1);
             error(ESocketErrorReason::E_REASON_SEND);
+            m_recv_buffer->State = EIOState::E_ERROR;
+            close();
             return -1;
           }
         }
@@ -798,12 +880,12 @@ namespace netpp {
       }
 
       if (m_send_buffer->State == EIOState::E_ASYNC) {
-        return sent_size;
+        return (int32_t)sent_size;
       }
 
       m_send_buffer->State = EIOState::E_COMPLETE;
       m_send_buffer->IsBusy = FALSE;
-      return sent_size;
+      return (int32_t)sent_size;
 #else
         switch (m_protocol) {
         case ETransportLayerProtocol::E_TCP: {
@@ -874,10 +956,10 @@ namespace netpp {
       void set_transferred(EPipeOperation op, int64_t transferred) {
         switch (op) {
         case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
+          m_recv_transferred = (uint32_t)transferred;
           break;
         case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
+          m_send_transferred = (uint32_t)transferred;
           break;
         default:
           break;
@@ -1367,7 +1449,7 @@ namespace netpp {
         return true;
       }
 
-      bool bind_and_listen(const char* addr, uint32_t backlog) override {
+      bool bind(const char* addr) override {
         sockaddr_in server_addr;
         ::ZeroMemory(&server_addr, sizeof(server_addr));
 
@@ -1383,6 +1465,14 @@ namespace netpp {
 
         if (::bind(m_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
           error(ESocketErrorReason::E_REASON_BIND);
+          return false;
+        }
+
+        return true;
+      }
+
+      bool listen(uint32_t backlog) override {
+        if (m_protocol == ETransportLayerProtocol::E_UDP) {
           return false;
         }
 
@@ -1425,14 +1515,14 @@ namespace netpp {
 
         char* send_buf = (char*)m_send_allocator->ptr(m_send_buf_block);
         uint32_t block_size = m_send_allocator->block_size();
-        int32_t bytes_sent = 0;
+        uint32_t bytes_sent = 0;
 
         uint32_t flags_ = flags ? *flags : 0;
         flags_ &= (uint32_t)~ESendFlags::E_FORCE_INSECURE;
         flags_ &= (uint32_t)~ESendFlags::E_PARTIAL_IO;
 
         while (bytes_sent < size) {
-          uint32_t chunk_size = min(size - bytes_sent, block_size);
+          uint32_t chunk_size = std::min(size - bytes_sent, block_size);
           memcpy_s(send_buf, (size_t)block_size, data, chunk_size);
           m_send_buffer->Length = (ULONG)chunk_size;
 
@@ -1449,11 +1539,11 @@ namespace netpp {
           }
 
           m_send_buffer->State = EIOState::E_PARTIAL;
-          return bytes_sent;
+          return (int32_t)bytes_sent;
         }
 
         m_send_buffer->State = EIOState::E_COMPLETE;
-        return bytes_sent;
+        return (int32_t)bytes_sent;
       }
 
       char* recv_buf() const override {
@@ -1491,10 +1581,10 @@ namespace netpp {
       void set_transferred(EPipeOperation op, int64_t transferred) {
         switch (op) {
         case EPipeOperation::E_RECV:
-          m_recv_transferred = transferred;
+          m_recv_transferred = (uint32_t)transferred;
           break;
         case EPipeOperation::E_SEND:
-          m_send_transferred = transferred;
+          m_send_transferred = (uint32_t)transferred;
           break;
         default:
           break;

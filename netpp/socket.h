@@ -15,15 +15,15 @@
 #include <sys/socket.h>
 #endif
 
-#include "netpp.h"
-#include "allocator.h"
-#include "network.h"
-#include "protocol.h"
-#include "security.h"
-#include "dns/record.h"
-#include "http/request.h"
-#include "http/response.h"
-#include "platform/socket.h"
+#include "netpp/netpp.h"
+#include "netpp/allocator.h"
+#include "netpp/network.h"
+#include "netpp/protocol.h"
+#include "netpp/security.h"
+#include "netpp/dns/record.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
+#include "netpp/platform/socket.h"
 
 namespace netpp {
 
@@ -46,21 +46,41 @@ namespace netpp {
     SocketProcData() {
       m_pipe = nullptr;
       m_proc_buf = nullptr;
+      m_recv_buf = nullptr;
+      m_recv_buf_size = 0;
       m_bytes_total = 0;
       m_bytes_processed = 0;
+      m_proc_until_closed = 0;
     }
 
     SocketProcData(ISocketPipe* pipe) {
       m_pipe = pipe;
       m_proc_buf = nullptr;
+      m_recv_buf = nullptr;
+      m_recv_buf_size = 0;
       m_bytes_total = 0;
       m_bytes_processed = 0;
+      m_proc_until_closed = 0;
     }
 
     ISocketPipe* m_pipe;
+    
+    char* m_recv_buf;
+    uint32_t m_recv_buf_size;
+
     char* m_proc_buf;
     uint32_t m_bytes_processed;
     uint32_t m_bytes_total;
+
+    bool m_proc_until_closed;
+  };
+
+  enum class EProcState {
+    E_FAILED = -1,
+    E_NONE,
+    E_SUCCEEDED,
+    E_WANTS_DATA,
+    E_FIN_PROCESSED,
   };
 
   class NETPP_API ISocketPipe {
@@ -109,7 +129,8 @@ namespace netpp {
     virtual SocketLock acquire_lock() = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
-    virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
+    virtual bool bind(const char* addr = nullptr) = 0;
+    virtual bool listen(uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
     virtual EIOState recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;
@@ -149,7 +170,7 @@ namespace netpp {
     virtual void* user_data() const = 0;
 
     virtual EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) = 0;
-    virtual int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) = 0;
+    virtual EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) = 0;
 
     virtual const SocketIOInfo& get_io_info() const = 0;
     virtual ISocketOSSupportLayer* get_os_layer() const = 0;
@@ -195,8 +216,12 @@ namespace netpp {
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
-    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
-      return m_socket_layer->bind_and_listen(addr, backlog);
+    bool bind(const char* addr = nullptr) override {
+      return m_socket_layer->bind(addr);
+    }
+
+    bool listen(uint32_t backlog = 0x7FFFFFFF) override {
+      return m_socket_layer->listen(backlog);
     }
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
@@ -251,7 +276,7 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
-    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
+    EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }
@@ -317,8 +342,12 @@ namespace netpp {
 
     bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) override;
 
-    bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) override {
-      return m_socket_layer->bind_and_listen(addr, backlog);
+    bool bind(const char* addr = nullptr) override {
+      return m_socket_layer->bind(addr);
+    }
+
+    bool listen(uint32_t backlog = 0x7FFFFFFF) override {
+      return m_socket_layer->listen(backlog);
     }
 
     bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) override;
@@ -371,7 +400,7 @@ namespace netpp {
     void* user_data() const override { return m_socket_layer->user_data(); }
 
     EAuthState proc_pending_auth(EPipeOperation last_op, int32_t post_transferred) override;
-    int32_t proc_post_recv(char** out_data, const char* in_data, uint32_t in_size) override;
+    EProcState proc_data(const char** out_data, uint32_t* out_size, uint32_t* recv_digested, const char* in_data, uint32_t in_size) override;
 
     const SocketIOInfo& get_io_info() const override { return m_io_info; }
     ISocketOSSupportLayer* get_os_layer() const { return m_socket_layer; }

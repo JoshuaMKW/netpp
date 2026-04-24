@@ -6,13 +6,13 @@
 #include <vector>
 #include <unordered_map>
 
-#include "netpp.h"
-#include "allocator.h"
-#include "network.h"
-#include "http/request.h"
-#include "http/response.h"
-#include "security.h"
-#include "socket.h"
+#include "netpp/netpp.h"
+#include "netpp/allocator.h"
+#include "netpp/network.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
+#include "netpp/security.h"
+#include "netpp/socket.h"
 
 namespace netpp {
 

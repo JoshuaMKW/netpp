@@ -15,17 +15,17 @@
 #include <sys/socket.h>
 #endif
 
-#include "netpp.h"
-#include "allocator.h"
-#include "network.h"
-#include "protocol.h"
-#include "sockenum.h"
-#include "http/request.h"
-#include "http/response.h"
+#include "netpp/netpp.h"
+#include "netpp/allocator.h"
+#include "netpp/network.h"
+#include "netpp/protocol.h"
+#include "netpp/sockenum.h"
+#include "netpp/http/request.h"
+#include "netpp/http/response.h"
 
 namespace netpp {
 
-    class DNS_Request;
+  class DNS_Request;
   class DNS_Response;
   class HTTP_Request;
   class HTTP_Response;
@@ -74,6 +74,7 @@ namespace netpp {
     struct OperationData {
       EPipeOperation m_operation;
       uint32_t m_bytes_transferred;
+      uint64_t m_socket;
     };
 
     using each_fn = std::function<bool(ISocketOSSupportLayer* pipe, const OperationData& info)>;
@@ -123,7 +124,8 @@ namespace netpp {
     virtual SocketLock acquire_lock() = 0;
 
     virtual bool accept(accept_cond_cb accept_cond, accept_cb accept_routine) = 0;
-    virtual bool bind_and_listen(const char* addr = nullptr, uint32_t backlog = 0x7FFFFFFF) = 0;
+    virtual bool bind(const char* addr = nullptr) = 0;
+    virtual bool listen(uint32_t backlog = 0x7FFFFFFF) = 0;
     virtual bool connect(uint64_t timeout = 0, const NetworkFlowSpec* recv_flowspec = nullptr, const NetworkFlowSpec* send_flowspec = nullptr) = 0;
 
     virtual int32_t recv(uint32_t offset, uint32_t* flags, uint32_t* transferred_out) = 0;

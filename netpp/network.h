@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "netpp.h"
+#include "netpp/netpp.h"
 
 namespace netpp {
 
@@ -57,7 +57,17 @@ namespace netpp {
     int m_min_policed_size;          // minimum policed size
   };
 
-  const char* network_ipv4();
-  const char* network_ipv6();
+  const char* host_ipv4();
+  const char* host_ipv6();
+
+  struct HostIPInfo {
+    char m_ipv4[33];
+    char m_ipv6[65];
+  };
+
+  constexpr size_t IPV4_MAX_SIZE = sizeof(HostIPInfo::m_ipv4);
+  constexpr size_t IPV6_MAX_SIZE = sizeof(HostIPInfo::m_ipv6);
+
+  HostIPInfo get_ip_address_info(const char *hostname);
 
 }  // namespace netpp

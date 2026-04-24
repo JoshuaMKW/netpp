@@ -1,3 +1,12 @@
+// **************************************************************
+// * netpp C++ Networking Library (chatroom example)
+// * Copyright (C) 2024-2025 Joshua Alston
+// *
+// * This program is free software; you can redistribute it and/or
+// * modify it under the terms of the GNU General Public License
+// * as published by the Free Software Foundation; either version 2
+// * of the License, or (at your option) any later version.
+// **************************************************************
 
 #include <chrono>
 #include <iostream>
@@ -46,6 +55,19 @@ int main(int argc, char** argv) {
   }
 
 #if SERVER_USE_TLS
+  if (!std::filesystem::exists(SERVER_CERT) && !std::filesystem::exists(SERVER_KEY)) {
+    std::filesystem::create_directories(std::filesystem::path(SERVER_CERT).parent_path());
+    std::filesystem::create_directories(std::filesystem::path(SERVER_KEY).parent_path());
+    if (!netpp::generate_client_key_rsa_2048(
+      SERVER_KEY,
+      SERVER_CERT,
+      "US",
+      "NetPP Chatroom")) {
+      fprintf(stderr, "Failed to generate self-signed certificate\n");
+      return 1;
+    }
+  }
+
   TLSSecurityFactory* security = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, "", "localhost", SERVER_CERT_PASSWD,
     ETLSVerifyFlags::VERIFY_PEER);
 #else
@@ -71,8 +93,8 @@ int main(int argc, char** argv) {
 
       HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_OK);
       response->set_version("1.1");
-      response->add_header("Content-Type: text/plain; charset=UTF-8");
-      response->add_header("Connection: keep-alive");
+      response->set_header("Content-Type: text/plain; charset=UTF-8");
+      response->set_header("Connection: keep-alive");
       response->set_body(history_content);
       return response;
     }
@@ -85,8 +107,8 @@ int main(int argc, char** argv) {
   router.on_unhandled([](const HTTP_Request* request) -> HTTP_Response* {
     HTTP_Response* response = HTTP_Response::create(EHTTP_ResponseStatusCode::E_STATUS_METHOD_NOT_ALLOWED);
     response->set_version("1.1");
-    response->add_header("Content-Type: text/plain; charset=UTF-8");
-    response->add_header("Connection: keep-alive");
+    response->set_header("Content-Type: text/plain; charset=UTF-8");
+    response->set_header("Connection: keep-alive");
     return response;
     });
 

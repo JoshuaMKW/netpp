@@ -5,12 +5,13 @@
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 
-#include "tls/security.h"
+#include "netpp/tls/security.h"
 
 namespace netpp {
 
   TLSSecurityController::TLSSecurityController(const TLSSecurityFactory* factory)
-    : m_factory(factory), m_initialized(false), m_ssl(), m_in_bio(), m_out_bio(), m_tls_ctx() {}
+    : m_factory(factory), m_initialized(false), m_ssl(), m_in_bio(), m_out_bio(), m_tls_ctx(), m_digested_by_crypt() {
+  }
 
   bool TLSSecurityController::is_authenticated() const { return m_handshake_state == EAuthState::E_AUTHENTICATED; }
   bool TLSSecurityController::is_failed() const { return m_handshake_state == EAuthState::E_FAILED; }
@@ -54,7 +55,7 @@ namespace netpp {
     SSL_CTX_set_max_proto_version(m_tls_ctx, TLS1_3_VERSION);
 
     // Set cipher list for TLS 1.2 and below
-    if (!SSL_CTX_set_cipher_list(m_tls_ctx, "ECDHE-RSA-AES128-GCM-SHA256")) {
+    if (!SSL_CTX_set_cipher_list(m_tls_ctx, "HIGH:!aNULL:!MD5")) {
       ERR_print_errors_fp(stderr);
       SSL_CTX_free(m_tls_ctx);
       m_tls_ctx = nullptr;
@@ -69,50 +70,74 @@ namespace netpp {
       return false;
     }
 
-    if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
-    }
-
-    if (!passwd.empty()) {
-      SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd.c_str());
-    }
-
-    if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
-    }
-
-    if (SSL_CTX_check_private_key(m_tls_ctx) == 0) {
-      ERR_print_errors_fp(stderr);
-      SSL_CTX_free(m_tls_ctx);
-      m_tls_ctx = nullptr;
-      return false;
-    }
-
-    if (m_factory->is_server()) {
-      SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
-
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, ca_file.c_str(), NULL) < 1) {
+    if (!cert_file.empty()) {
+      if (SSL_CTX_use_certificate_file(m_tls_ctx, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(m_tls_ctx);
         m_tls_ctx = nullptr;
         return false;
       }
     }
-    else {
-      SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
 
-      // Load the server's certificate as a trusted CA
-      if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
+    if (!passwd.empty()) {
+      SSL_CTX_set_default_passwd_cb_userdata(m_tls_ctx, (void*)passwd.c_str());
+    }
+
+    if (!cert_file.empty()) {
+      if (SSL_CTX_use_PrivateKey_file(m_tls_ctx, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
         SSL_CTX_free(m_tls_ctx);
         m_tls_ctx = nullptr;
         return false;
+      }
+
+      if (SSL_CTX_check_private_key(m_tls_ctx) == 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(m_tls_ctx);
+        m_tls_ctx = nullptr;
+        return false;
+      }
+    }
+
+    if (m_factory->is_server()) {
+      SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
+
+      if (!ca_file.empty()) {
+        if (SSL_CTX_load_verify_locations(m_tls_ctx, ca_file.c_str(), NULL) < 1) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
+      }
+      else {
+        if (!load_system_cacerts(m_tls_ctx)) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
+      }
+    }
+    else {
+      SSL_CTX_set_verify(m_tls_ctx, (int)m_factory->verify_flags(), NULL);
+
+      // Load the server's certificate as a trusted CA
+      if (!cert_file.empty()) {
+        if (SSL_CTX_load_verify_locations(m_tls_ctx, cert_file.c_str(), NULL) < 1) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
+      }
+      else {
+        if (!load_system_cacerts(m_tls_ctx)) {
+          ERR_print_errors_fp(stderr);
+          SSL_CTX_free(m_tls_ctx);
+          m_tls_ctx = nullptr;
+          return false;
+        }
       }
 
       if (auto* ca_list = SSL_load_client_CA_file(ca_file.c_str())) {
@@ -128,12 +153,19 @@ namespace netpp {
       return false;
     }
 
+    if (!hostname.empty()) {
+      SSL_set_tlsext_host_name(m_ssl, hostname.c_str());
+    }
+
     m_in_bio = BIO_new(BIO_s_mem());
     BIO_set_nbio(m_in_bio, 1);
     m_out_bio = BIO_new(BIO_s_mem());
     BIO_set_nbio(m_out_bio, 1);
 
     SSL_set_bio(m_ssl, m_in_bio, m_out_bio);
+
+    // Set the memory BIO to NOT automatically retry, so we handle logic manually
+    BIO_set_mem_eof_return(m_in_bio, -1);
 
     m_initialized = true;
     m_handshake_state = EAuthState::E_NONE;
@@ -182,14 +214,22 @@ namespace netpp {
     int32_t recv_transferred = last_op == EPipeOperation::E_RECV ? post_transferred : 0;
     int32_t send_transferred = last_op == EPipeOperation::E_SEND ? post_transferred : 0;
 
-    SocketLock l = pipe->acquire_lock();
-
     EProcState proc_state = EProcState::E_READY;
     bool wants_recv = false;
     int32_t transferring = 0;
 
+    SocketLock l = pipe->acquire_lock();
+
+    if (last_op == EPipeOperation::E_RECV && post_transferred > 0) {
+      char* recv_buf = pipe->get_os_layer()->recv_buf();
+      int written = BIO_write(m_in_bio, recv_buf, post_transferred);
+      if (written <= 0) {
+        // Handle Fatal Error
+        return EAuthState::E_FAILED;
+      }
+    }
+
     while (proc_state == EProcState::E_READY) {
-    update_handshake:
       result = SSL_do_handshake(m_ssl);
       if (result == 1) {
         // Handshake completed successfully
@@ -259,57 +299,96 @@ namespace netpp {
     return m_handshake_state;
   }
 
-  int64_t TLSSecurityController::decrypt(const char* data, size_t size, char** decrypt_out)
+  static bool calculate_iosize_from_tls_record_vector(const char* data, size_t data_size, size_t& isize, size_t& osize);
+
+  ESecurityState TLSSecurityController::decrypt(const char* tls_data, uint32_t tls_size, decrypt_cb on_decrypt)
   {
+    m_digested_by_crypt = 0;
+
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
-      return -1;
+      return ESecurityState::E_FAILED;
     }
 
-    if (data == nullptr || decrypt_out == nullptr || size == 0) {
-      return -1;
+    if (tls_data == nullptr) {
+      return ESecurityState::E_FAILED;
     }
 
-    if (BIO_write(m_in_bio, data, size) != size) {
-      return -1;
+    size_t rsize, wsize;
+    if (!calculate_iosize_from_tls_record_vector(tls_data, tls_size, rsize, wsize)) {
+      return ESecurityState::E_WANTS_DATA;
     }
 
-    // Get the expected TLS Record size...
-    uint16_t tls_rec_size;
-    *((uint8_t*)(&tls_rec_size) + 0) = data[4];
-    *((uint8_t*)(&tls_rec_size) + 1) = data[3];
+    m_digested_by_crypt = (uint32_t)rsize;
 
-    // If this is the case, the TLS Record
-    // has not been fully received yet and
-    // we should wait for more data...
-    if (size < tls_rec_size + 5) {
-      return 0;
+    // 1. Feed new data into OpenSSL (if any)
+    if (tls_size > 0) {
+      int written = BIO_write(m_in_bio, tls_data, (int)tls_size);
+      if (written <= 0) {
+        return ESecurityState::E_FAILED; // BIO failure
+      }
     }
 
-    *decrypt_out = new char[tls_rec_size];
+    char* decrypt_out = static_cast<char*>(malloc(wsize));
 
-    int bytes = SSL_read(m_ssl, *decrypt_out, tls_rec_size);
-    if (bytes >= 0) {
-      return bytes;
-    }
-    else {
-      unsigned long err = ERR_get_error();
-      fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
+    uint32_t total_decrypted = 0;
+    uint32_t total_processed_delta = 0;
+    uint64_t beg_proc_read = BIO_number_read(m_in_bio);
+
+    while (rsize - total_processed_delta > 0) {
+      int ret_val = SSL_read(m_ssl, decrypt_out + total_decrypted, (int)(rsize - total_decrypted));
+
+      if (ret_val > 0) {
+        total_processed_delta = BIO_number_read(m_in_bio) - beg_proc_read;
+        total_decrypted += ret_val;
+      }
+      else {
+        int ssl_err = SSL_get_error(m_ssl, ret_val);
+
+        // Case A: No more data available right now (Normal Exit)
+        if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+          return ESecurityState::E_WANTS_DATA;
+        }
+
+        // Case B: Peer closed connection gracefully (EOF)
+        if (ssl_err == SSL_ERROR_ZERO_RETURN) {
+          return ESecurityState::E_FIN_PROCESSED;
+        }
+
+        // Case C: Actual Fatal Error
+        unsigned long err = ERR_get_error();
+        // If checking syscall error, sometimes queue is empty, meaning EOF/Connection Reset
+        if (ssl_err == SSL_ERROR_SYSCALL && err == 0) {
+          return ESecurityState::E_FIN_PROCESSED; // Treat as dirty EOF
+        }
+
+        fprintf(stderr, "OpenSSL Fatal error: %s\n", ERR_error_string(err, nullptr));
+        return ESecurityState::E_FAILED;
+      }
     }
 
-    return -1;
+    if (total_decrypted <= 0) {
+      return ESecurityState::E_FAILED;
+    }
+
+    return
+      on_decrypt(decrypt_out, total_decrypted) ? ESecurityState::E_SUCCEEDED : ESecurityState::E_FAILED;
   }
 
-  int64_t TLSSecurityController::encrypt(const char* data, size_t size, char** encrypt_out)
+  ESecurityState TLSSecurityController::encrypt(const char* data, uint32_t size, encrypt_cb on_encrypt)
   {
     if (m_handshake_state != EAuthState::E_AUTHENTICATED) {
-      return -1;
+      return ESecurityState::E_FAILED;
     }
 
-    if (data == nullptr || encrypt_out == nullptr || size == 0) {
-      return -1;
+    if (data == nullptr || size == 0) {
+      return ESecurityState::E_FAILED;
     }
 
-    int processed = SSL_write(m_ssl, data, size);
+    if (!on_encrypt) {
+      return ESecurityState::E_FAILED;
+    }
+
+    int processed = SSL_write(m_ssl, data, (int)size);
     if (processed <= 0) {
       unsigned long err = ERR_get_error();
       if (err == 0) {
@@ -318,18 +397,24 @@ namespace netpp {
       else {
         fprintf(stderr, "OpenSSL error: %s\n", ERR_error_string(err, nullptr));
       }
-      return -1;
+      return ESecurityState::E_FAILED;
     }
 
-    int written = BIO_ctrl_pending(m_out_bio);
-    *encrypt_out = new char[written];
+    int written = (int)BIO_ctrl_pending(m_out_bio);
+    char* encrypt_out = (char*)malloc(written);
 
-    int bytes = BIO_read(m_out_bio, *encrypt_out, written);
+    int bytes = BIO_read(m_out_bio, encrypt_out, written);
     if (bytes <= 0) {
-      return -1;
+      free(encrypt_out);
+      return ESecurityState::E_FAILED;
     }
 
-    return bytes;
+    // encrypt_out passes ownership to callback for optimization purposes
+    return on_encrypt(encrypt_out, bytes) ? ESecurityState::E_SUCCEEDED : ESecurityState::E_FAILED;
+  }
+
+  uint32_t TLSSecurityController::get_digested_by_crypt() const {
+    return m_digested_by_crypt;
   }
 
   TLSSecurityController::EProcState
@@ -338,8 +423,8 @@ namespace netpp {
     uint32_t send_buf_size = pipe->get_os_layer()->send_buf_size();
     char* tls_out = new char[send_buf_size];
 
-    int pending = BIO_ctrl_pending(m_out_bio);
-    int bytes_to_send = BIO_read(m_out_bio, tls_out, min(pending, send_buf_size));
+    int pending = (int)BIO_ctrl_pending(m_out_bio);
+    int bytes_to_send = BIO_read(m_out_bio, tls_out, std::min(pending, (int)send_buf_size));
     if (bytes_to_send > 0) {
       if (pipe->is_busy(EPipeOperation::E_SEND)) {
         return EProcState::E_WAITING;
@@ -418,4 +503,29 @@ namespace netpp {
   {
   }
 
+  bool calculate_iosize_from_tls_record_vector(const char* data, size_t data_size, size_t& isize, size_t& osize)
+  {
+    isize = 0;
+    osize = 0;
+
+    size_t offset = 0;
+    while (offset + 5 <= data_size) {
+      // TLS record header is 5 bytes
+      // Byte 0: Content Type
+      // Byte 1-2: Version
+      // Byte 3-4: Length (Big Endian)
+
+      uint16_t length = (static_cast<uint8_t>(data[offset + 3]) << 8) | static_cast<uint8_t>(data[offset + 4]);
+      // Check if the remaining data is enough for the current record
+      if (offset + 5 + length > data_size) {
+        return false; // Incomplete record
+      }
+
+      isize += length + 5;
+      osize += length + 2048 + 5;
+      offset += static_cast<size_t>(5 + length); // Move to the next record
+    }
+
+    return true;
+  }
 }

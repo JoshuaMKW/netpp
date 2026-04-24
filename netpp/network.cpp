@@ -1,4 +1,4 @@
-#include "network.h"
+#include "netpp/network.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -47,31 +47,32 @@ namespace netpp {
   static char s_ipv4_address[INET_ADDRSTRLEN];
   static char s_ipv6_address[INET6_ADDRSTRLEN];
 
-  const char* network_ipv4() {
+  const char* host_ipv4() {
     if (get_ip_address("localhost", s_ipv4_address, INET_ADDRSTRLEN, s_ipv6_address, INET6_ADDRSTRLEN)) {
       return s_ipv4_address;
     }
     return nullptr;
   }
 
-  const char* network_ipv6() {
+  const char* host_ipv6() {
     if (get_ip_address("localhost", s_ipv4_address, INET_ADDRSTRLEN, s_ipv6_address, INET6_ADDRSTRLEN)) {
       return s_ipv6_address;
     }
     return nullptr;
   }
+  
+  HostIPInfo get_ip_address_info(const char* hostname) {
+    HostIPInfo info = {};
+    get_ip_address(hostname, info.m_ipv4, IPV4_MAX_SIZE, info.m_ipv6, IPV6_MAX_SIZE);
+    return info;
+  }
 
   RawPacket* RawPacket::create(const char* data, uint32_t size) {
-    if (size <= 4) {
-      return nullptr;
+    if (size == 0) {
+        return nullptr;
     }
 
-    uint32_t true_size = *(uint32_t*)data;
-    if (true_size > 1 * 1000 * 1000 * 1000) {
-      return nullptr;
-    }
-
-    return new RawPacket(data + 4, true_size);
+    return new RawPacket(data, size);
   }
 
   const char* RawPacket::build_buf(const RawPacket& packet) {

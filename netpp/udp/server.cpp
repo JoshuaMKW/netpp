@@ -287,7 +287,7 @@ namespace netpp {
       return false;
     }
 
-    if (!m_server_socket->bind_and_listen()) {
+    if (!m_server_socket->bind()) {
       deinitialize();
       return false;
     }
@@ -351,22 +351,6 @@ namespace netpp {
 
     //data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
 
-    // Under this circumstance, the total data hasn't been determined
-    // yet, so allocate a temporary smaller one to process
-    // the adapter with...
-    // ---
-    // We create a copy of the proc buffer pointer because
-    // later we do some pointer swapping based on the
-    // predicted size of the processed data...
-    // ---
-    char* proc_buf = nullptr;
-    if (data.m_bytes_total == 0) {
-      proc_buf = new char[info.m_bytes_transferred];
-    }
-    else {
-      proc_buf = data.m_proc_buf;
-    }
-
     // Here we process enough to determine the underlying protocol
     // ---
     // The goal is this--m_proc_buf points to the potentially decrypted
@@ -376,66 +360,98 @@ namespace netpp {
     // processed, we are able to stitch together fragmented
     // data packets incoming from the socket...
     // ---
-    char* post_out;
-    int32_t true_size = pipe->proc_post_recv(
-      &post_out,
-      recv_buf,
-      info.m_bytes_transferred
+    const char* proc_out;
+    uint32_t proc_size, recv_digested;
+    EProcState proc_state = pipe->proc_data(
+      &proc_out,
+      &proc_size,
+      &recv_digested,
+      data.m_recv_buf,
+      data.m_recv_buf_size
     );
 
-    // It has failed in some manner...
-    // ---
-    if (true_size < 0) {
-      delete[] proc_buf;
-      inproc = false;
+    if (proc_state == EProcState::E_FAILED) {
       return nullptr;
     }
+
+    if (recv_digested > 0) {
+      data.m_recv_buf_size -= recv_digested;
+      memmove_s(data.m_recv_buf, data.m_recv_buf_size, data.m_recv_buf + recv_digested, data.m_recv_buf_size);
+    }
+
+    // Prepare the copied recv buffer by reallocing and
+    // concatenating the new data. This is eventually processed
+    // all at once, either on the first pass for unencrypted
+    // data, or potentially after many recv streams when encrypted.
+    // ---
+    char* proc_recv_buf = (char*)realloc(data.m_recv_buf, data.m_recv_buf_size + info.m_bytes_transferred);
+    if (proc_recv_buf) {
+      data.m_recv_buf = proc_recv_buf;
+    }
+    memmove_s(data.m_recv_buf + data.m_recv_buf_size, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+    data.m_recv_buf_size += info.m_bytes_transferred;
 
     // Under this circumstance, the pipe is waiting
     // for more data to be received to complete the
     // processing. This is important for TLS Records
     // and other such structures...
     // ---
-    if (true_size == 0) {
-      delete[] proc_buf;
+    if (proc_state == EProcState::E_WANTS_DATA) {
       inproc = true;
       return nullptr;
     }
 
+    // Now the received data has been successfully post-processed
+    // (decrypted, etc) and is ready for consumption.
+    // ---
+    // However, under this circumstance, the total data
+    // hasn't been determined yet, so allocate a temporary
+    // smaller one to process the adapter with...
+    // ---
+    // We create a copy of the proc buffer pointer because
+    // later we do some pointer swapping based on the
+    // predicted size of the processed data...
+    // ---
+    char* proc_buf = nullptr;
+    if (data.m_bytes_total == 0) {
+      proc_buf = (char*)malloc(data.m_recv_buf_size);
+      data.m_bytes_processed = 0;
+    }
+    else {
+      // At this point the total expected size of whatever
+      // processed application layer protocol has been
+      // determined and preallocated. So we just use
+      // that calculation.
+      // ---
+      proc_buf = data.m_proc_buf;
+    }
+
     // Update the processed marker so the next pass is correctly offset...
     // ---
-    memcpy_s(proc_buf + data.m_bytes_processed, true_size, post_out, true_size);
-    data.m_bytes_processed += true_size;
+    const uint32_t cur_processed = data.m_bytes_processed + proc_size;
+    memcpy_s(proc_buf + data.m_bytes_processed, proc_size, proc_out, proc_size);
 
     // Then we attempt to identify what kind of data is coming in from
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, true_size, m_security);
-    if (!adapter) {
-      delete adapter;
-      delete[] proc_buf;
-      inproc = false;
-      return nullptr;
-    }
+    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
-    if (data.m_bytes_total == 0) {
-      data.m_bytes_total = adapter->calc_size(proc_buf, data.m_bytes_processed);
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
+      data.m_bytes_total = adapter->calc_size(proc_buf, cur_processed);
+      data.m_proc_until_closed = data.m_bytes_total == 0;
     }
 
     // If the adapter is not valid, we need to reset the state
     // and return an error...
     // ---
-    if (data.m_bytes_total == 0) {
+    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
       pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-      delete adapter;
-      delete[] proc_buf;
-
       data.m_bytes_total = 0;
       data.m_bytes_processed = 0;
-      delete[] data.m_proc_buf;
+      free(data.m_proc_buf);
       data.m_proc_buf = nullptr;
       return nullptr;
     }
@@ -444,16 +460,30 @@ namespace netpp {
     // the total expected data, we go ahead and resize the
     // buffer to be the total bytes for the upcoming reads...
     // ---
-    if (!data.m_proc_buf) {
-      if (data.m_bytes_total > info.m_bytes_transferred) {
-        char* new_proc_buf = new char[data.m_bytes_total];
+    if (data.m_proc_until_closed) {
+      char* new_proc_buf = (char*)realloc(data.m_proc_buf, cur_processed);
+      if (new_proc_buf) {
+        if (!data.m_proc_buf) {
+          memcpy_s(
+            new_proc_buf,
+            data.m_bytes_processed,
+            proc_buf,
+            data.m_bytes_processed
+          );
+        }
+        data.m_proc_buf = new_proc_buf;
+      }
+    }
+    else if (!data.m_proc_buf) {
+      if (data.m_bytes_total > data.m_recv_buf_size) {
+        char* new_proc_buf = (char*)malloc(data.m_bytes_total);
         memcpy_s(
           new_proc_buf,
           data.m_bytes_processed,
           proc_buf,
           data.m_bytes_processed
         );
-        delete[] proc_buf;
+        free(proc_buf);
         data.m_proc_buf = new_proc_buf;
       }
       else {
@@ -461,9 +491,11 @@ namespace netpp {
       }
     }
 
+    data.m_bytes_processed = cur_processed;
+
+
     // Initiate the next read...
-    if (data.m_bytes_processed < data.m_bytes_total) {
-      delete adapter;
+    if (data.m_proc_until_closed || data.m_bytes_processed < data.m_bytes_total) {
       uint32_t flags = 0;
       pipe->get_os_layer()->set_busy(EPipeOperation::E_RECV, false);
       uint32_t transferred;
@@ -703,22 +735,15 @@ namespace netpp {
   void UDP_Server::receive_on_sockets() {
     std::scoped_lock<std::recursive_mutex> lock(m_mutex);
 
-    for (auto& socket : m_client_sockets) {
-      ISocketPipe* pipe = socket.second.m_pipe;
-      if (pipe->is_busy(EPipeOperation::E_RECV)) {
-        continue;
-      }
+    EIOState state = m_server_socket->recv(0, nullptr, nullptr);
+    if (state == EIOState::E_BUSY) {
+      m_server_socket->error(ESocketErrorReason::E_REASON_RECV);
+      return;
+    }
 
-      EIOState state = pipe->recv(0, nullptr, nullptr);
-      if (state == EIOState::E_BUSY) {
-        pipe->error(ESocketErrorReason::E_REASON_RECV);
-        continue;
-      }
-
-      if (state == EIOState::E_ERROR) {
-        pipe->error(ESocketErrorReason::E_REASON_RECV);
-        continue;
-      }
+    if (state == EIOState::E_ERROR) {
+      m_server_socket->error(ESocketErrorReason::E_REASON_RECV);
+      return;
     }
   }
 
@@ -744,48 +769,6 @@ namespace netpp {
   }
 
   uint64_t UDP_Server::server_accept_thread(void* param) {
-    UDP_Server* server = (UDP_Server*)param;
-
-    SOCKADDR_STORAGE from;
-    ZeroMemory(&from, sizeof(from));
-
-    while (server->is_running()) {
-      bool success = server->m_server_socket->accept(nullptr, [server](uint64_t socket) {
-        std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
-
-        ISecurityController* controller = nullptr;
-        if (server->m_security) {
-          controller = server->m_security->create_controller();
-        }
-
-        ISocketPipe* client_pipe = new UDP_Socket(
-          server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, controller, ESocketHint::E_SERVER);
-
-        client_pipe->open(socket);
-        client_pipe->clone_callbacks_from(server->m_server_socket);
-
-        if (server->m_security) {
-          server->m_pending_auth_sockets[socket] = SocketProcData(client_pipe);
-
-          controller->set_accept_state();
-          client_pipe->proc_pending_auth(EPipeOperation::E_NONE, 0);
-          //{
-          //  TLS_SocketProxy* proxy = static_cast<TLS_SocketProxy*>(client_pipe);
-          //  {
-          //    SocketLock l = proxy->acquire_lock();
-          //    proxy->set_accept_state();
-          //  }
-          //  proxy->proc_pending_auth(EPipeOperation::E_NONE, 0);
-          //}
-        }
-        else {
-          server->m_client_sockets[socket] = SocketProcData(client_pipe);
-        }
-
-        return true;
-        });
-    }
-
     return 0;
   }
 
@@ -833,6 +816,17 @@ namespace netpp {
       std::scoped_lock<std::recursive_mutex> lock(server->m_mutex);
 
       sock_results->for_each([server](ISocketOSSupportLayer* pipe, const ISocketIOResult::OperationData& info) {
+        if (!pipe) {
+          // We need to establish a logical "connection" here.
+
+          ISecurityController* controller = nullptr;
+          if (server->m_security) {
+            controller = server->m_security->create_controller();
+          }
+
+          server->m_client_sockets[0] = new UDP_Socket(server->m_server_socket, &server->m_recv_allocator, &server->m_send_allocator, controller, ESocketHint::E_SERVER);
+        }
+
         bool is_disconnect = info.m_bytes_transferred == 0;
         if (is_disconnect) {
           pipe->close();

@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "netpp.h"
+#include "netpp/netpp.h"
 
 namespace netpp {
 
-  class StaticBlockAllocator {
+  class NETPP_API StaticBlockAllocator {
   public:
     StaticBlockAllocator() = default;
     StaticBlockAllocator(void* buffer, uint32_t block_size, uint32_t block_count);
