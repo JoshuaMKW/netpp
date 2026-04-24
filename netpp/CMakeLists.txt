@@ -7,9 +7,6 @@ project(netpp VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(OPENSSL_USE_STATIC_LIBS FALSE)
-find_package(OpenSSL REQUIRED)
-
 # Define the library
 add_library(netpp STATIC
     allocator.cpp
@@ -19,17 +16,19 @@ add_library(netpp STATIC
     security.h
     server.cpp
     socket.h
+    sockenum.h
 
     platform/socket.h
     platform/socket.cpp
 
-    http/request.cpp
-    http/response.cpp
-
+    tls/security.h
+    tls/security.cpp
     
-    
-    "tls/security.h"
-    "tls/security.cpp"
+    dtls/security.cpp
+    dtls/security.h
+    dtls/dtls_bio.h
+    dtls/dtls_bio.cpp
+    dtls/cookie.h
 
     tcp/socket.cpp
     tcp/client.cpp
@@ -38,22 +37,31 @@ add_library(netpp STATIC
     udp/socket.cpp
     udp/client.cpp
     udp/server.cpp
- "http/router.h" "http/router.cpp" "sockenum.h" "dtls/security.cpp" "dtls/security.h" "dtls/dtls_bio.h" "dtls/dtls_bio.cpp" "dtls/cookie.h" "dns/request.cpp" "dns/request.h" "dns/response.cpp" "dns/response.h" "dns/record.h" "dns/record.cpp")
 
-# Include directories
-target_include_directories(netpp PRIVATE
-    ${CMAKE_SOURCE_DIR}/netpp
-    ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
+    http/router.h
+    http/router.cpp
+    
+    dns/record.h
+    dns/record.cpp
 )
 
+set(OPENSSL_USE_STATIC_LIBS FALSE)
+find_package(OpenSSL REQUIRED)
+
 # Link libraries
-target_link_libraries(netpp PRIVATE
+target_link_libraries(netpp PUBLIC
     OpenSSL::SSL
     OpenSSL::Crypto
 )
 
+# Include directories
+target_include_directories(netpp PUBLIC
+    ${CMAKE_SOURCE_DIR}/netpp
+    #${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/include
+)
+
 # Add preprocessor definitions
-target_compile_definitions(netpp PRIVATE
+target_compile_definitions(netpp PUBLIC
     $<$<CONFIG:Debug>:_DEBUG;_CONSOLE;NETPP_EXPORTS;NETPP_STATIC;>
     $<$<CONFIG:Release>:NDEBUG;_CONSOLE;NETPP_STATIC>
 )
