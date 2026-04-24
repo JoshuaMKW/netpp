@@ -1,7 +1,5 @@
 #include "protocol.h"
 #include "dns/record.h"
-#include "dns/request.h"
-#include "dns/response.h"
 #include "http/request.h"
 #include "http/response.h"
 #include "socket.h"
@@ -191,6 +189,10 @@ namespace netpp {
 
     if (HTTP_Request::is_http_request(data, size) || HTTP_Response::is_http_response(data, size)) {
       protocol = security ? EApplicationLayerProtocol::E_HTTPS : EApplicationLayerProtocol::E_HTTP;
+    }
+
+    if (DNS_Message::is_data_query(data, size) || DNS_Message::is_data_response(data, size)) {
+      protocol = EApplicationLayerProtocol::E_DNS;
     }
 
     return create(protocol);

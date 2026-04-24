@@ -8,7 +8,7 @@
 namespace netpp {
 
 // RFC1035 - 3.2.2
-enum EDNSQuery_RR_TYPE : uint16_t {
+enum class EDNSQuery_RR_TYPE : uint16_t {
     TYPE_A = 1, // Host address
     TYPE_NS = 2, // Authoritative Name Server
     TYPE_MD = 3, // Mail Destination
@@ -28,7 +28,7 @@ enum EDNSQuery_RR_TYPE : uint16_t {
 };
 
 // RFC1035 - 3.2.3
-enum EDNSQuery_RR_QTYPE : uint16_t {
+enum class EDNSQuery_RR_QTYPE : uint16_t {
     TYPE_A = 1, // Host address
     TYPE_NS = 2, // Authoritative Name Server
     TYPE_MD = 3, // Mail Destination
@@ -54,7 +54,7 @@ enum EDNSQuery_RR_QTYPE : uint16_t {
 };
 
 // RFC1035 - 3.2.4
-enum EDNSQuery_RR_CLASS : uint16_t {
+enum class EDNSQuery_RR_CLASS : uint16_t {
     CLASS_IN = 1, // Internet, default
     CLASS_CS = 2, // CSNET, (Obsolete - used only for examples in some obsolete RFCs)
     CLASS_CH = 3, // CHAOS
@@ -62,7 +62,7 @@ enum EDNSQuery_RR_CLASS : uint16_t {
 };
 
 // RFC1035 - 3.2.5
-enum EDNSQuery_RR_QCLASS : uint16_t {
+enum class EDNSQuery_RR_QCLASS : uint16_t {
     CLASS_IN = 1, // Internet, default
     CLASS_CS = 2, // CSNET, (Obsolete - used only for examples in some obsolete RFCs)
     CLASS_CH = 3, // CHAOS
@@ -71,7 +71,7 @@ enum EDNSQuery_RR_QCLASS : uint16_t {
     QCLASS_ALL = 255, // Any Class
 };
 
-class DNS_RData {};
+class DNS_RData { };
 
 class DNS_Question {
 public:
@@ -98,7 +98,6 @@ private:
     EDNSQuery_RR_CLASS m_class;
     EDNSQuery_RR_TYPE m_type;
     uint32_t m_ttl;
-    uint32_t m_rdlength;
     DNS_RData* m_rdata;
 };
 
@@ -137,9 +136,13 @@ private:
 class DNS_RData_CNAME final : public DNS_RData {
 public:
     DNS_RData_CNAME() = delete;
-    DNS_RData_CNAME(const std::string& cname);
+    DNS_RData_CNAME(const std::string& cname)
+        : m_cname(cname)
+    {
+    }
 
-    const std::string& cname() const noexcept {
+    const std::string& cname() const noexcept
+    {
         return m_cname;
     }
 
@@ -150,13 +153,19 @@ private:
 class DNS_RData_HINFO final : public DNS_RData {
 public:
     DNS_RData_HINFO() = delete;
-    DNS_RData_HINFO(const std::string& cpu, const std::string& os);
+    DNS_RData_HINFO(const std::string& cpu, const std::string& os)
+        : m_cpu(cpu)
+        , m_os(os)
+    {
+    }
 
-    const std::string& cpu() const noexcept {
+    const std::string& cpu() const noexcept
+    {
         return m_cpu;
     }
 
-    const std::string& os() const noexcept {
+    const std::string& os() const noexcept
+    {
         return m_os;
     }
 
@@ -168,7 +177,10 @@ private:
 class DNS_RData_MB final : public DNS_RData {
 public:
     DNS_RData_MB() = delete;
-    DNS_RData_MB(const std::string& madname);
+    DNS_RData_MB(const std::string& madname)
+        : m_madname(madname)
+    {
+    }
 
     const std::string& madname() const noexcept
     {
@@ -182,7 +194,10 @@ private:
 class DNS_RData_MD final : public DNS_RData {
 public:
     DNS_RData_MD() = delete;
-    DNS_RData_MD(const std::string& madname);
+    DNS_RData_MD(const std::string& madname)
+        : m_madname(madname)
+    {
+    }
 
     const std::string& madname() const noexcept
     {
@@ -196,7 +211,10 @@ private:
 class DNS_RData_MF final : public DNS_RData {
 public:
     DNS_RData_MF() = delete;
-    DNS_RData_MF(const std::string& madname);
+    DNS_RData_MF(const std::string& madname)
+        : m_madname(madname)
+    {
+    }
 
     const std::string& madname() const noexcept
     {
@@ -210,7 +228,10 @@ private:
 class DNS_RData_MG final : public DNS_RData {
 public:
     DNS_RData_MG() = delete;
-    DNS_RData_MG(const std::string& mgmname);
+    DNS_RData_MG(const std::string& mgmname)
+        : m_mgmname(mgmname)
+    {
+    }
 
     const std::string& mgmname() const noexcept
     {
@@ -224,7 +245,11 @@ private:
 class DNS_RData_MINFO final : public DNS_RData {
 public:
     DNS_RData_MINFO() = delete;
-    DNS_RData_MINFO(const std::string& rmailbx, const std::string emailbx);
+    DNS_RData_MINFO(const std::string& rmailbx, const std::string& emailbx)
+        : m_rmailbx(rmailbx)
+        , m_emailbx(emailbx)
+    {
+    }
 
     const std::string& rmailbx() const noexcept
     {
@@ -244,7 +269,10 @@ private:
 class DNS_RData_MR final : public DNS_RData {
 public:
     DNS_RData_MR() = delete;
-    DNS_RData_MR(const std::string& newname);
+    DNS_RData_MR(const std::string& newname)
+        : m_newname(newname)
+    {
+    }
 
     const std::string& newname() const noexcept
     {
@@ -258,9 +286,14 @@ private:
 class DNS_RData_MX final : public DNS_RData {
 public:
     DNS_RData_MX() = delete;
-    DNS_RData_MX(uint16_t preference, const std::string& exchange);
+    DNS_RData_MX(uint16_t preference, const std::string& exchange)
+        : m_preference(preference)
+        , m_exchange(exchange)
+    {
+    }
 
-    uint16_t preference() const noexcept {
+    uint16_t preference() const noexcept
+    {
         return m_preference;
     }
 
@@ -277,7 +310,10 @@ private:
 class DNS_RData_NULL final : public DNS_RData {
 public:
     DNS_RData_NULL() = delete;
-    DNS_RData_NULL(const std::vector<uint8_t>& anything);
+    DNS_RData_NULL(const std::vector<uint8_t>& anything)
+        : m_data(anything)
+    {
+    }
 
     const std::vector<uint8_t>& data() const noexcept
     {
@@ -291,7 +327,10 @@ private:
 class DNS_RData_NS final : public DNS_RData {
 public:
     DNS_RData_NS() = delete;
-    DNS_RData_NS(const std::string& nsdname);
+    DNS_RData_NS(const std::string& nsdname)
+        : m_nsdname(nsdname)
+    {
+    }
 
     const std::string& nsdname() const noexcept
     {
@@ -305,7 +344,10 @@ private:
 class DNS_RData_PTR final : public DNS_RData {
 public:
     DNS_RData_PTR() = delete;
-    DNS_RData_PTR(const std::string& ptrdname);
+    DNS_RData_PTR(const std::string& ptrdname)
+        : m_ptrdname(ptrdname)
+    {
+    }
 
     const std::string& ptrdname() const noexcept
     {
@@ -320,7 +362,16 @@ class DNS_RData_SOA final : public DNS_RData {
 public:
     DNS_RData_SOA() = delete;
     DNS_RData_SOA(const std::string& mname, const std::string& rname, uint32_t serial,
-                  uint32_t refresh, uint32_t retry, uint32_t expire, uint32_t minimum);
+        uint32_t refresh, uint32_t retry, uint32_t expire, uint32_t minimum)
+        : m_mname(mname)
+        , m_rname(rname)
+        , m_serial(serial)
+        , m_refresh(refresh)
+        , m_retry(retry)
+        , m_expire(expire)
+        , m_minimum(minimum)
+    {
+    }
 
     const std::string& mname() const noexcept
     {
@@ -329,10 +380,11 @@ public:
 
     const std::string& rname() const noexcept
     {
-        return m_mname;
+        return m_rname; // Fixed from m_mname
     }
 
-    uint32_t serial() const noexcept {
+    uint32_t serial() const noexcept
+    {
         return m_serial;
     }
 
@@ -353,7 +405,7 @@ public:
 
     uint32_t minimum() const noexcept
     {
-        return m_expire;
+        return m_minimum; // Fixed from m_expire
     }
 
 private:
@@ -369,7 +421,10 @@ private:
 class DNS_RData_TXT final : public DNS_RData {
 public:
     DNS_RData_TXT() = delete;
-    DNS_RData_TXT(const std::vector<std::string>& txtdata);
+    DNS_RData_TXT(const std::vector<std::string>& txtdata)
+        : m_txtdata(txtdata)
+    {
+    }
 
     const std::vector<std::string>& txtdata() const noexcept
     {
@@ -383,7 +438,10 @@ private:
 class DNS_RData_A final : public DNS_RData {
 public:
     DNS_RData_A() = delete;
-    DNS_RData_A(uint32_t address);
+    DNS_RData_A(uint32_t address)
+        : m_address(address)
+    {
+    }
 
     uint32_t address() const noexcept
     {
@@ -397,7 +455,12 @@ private:
 class DNS_RData_WKS final : public DNS_RData {
 public:
     DNS_RData_WKS() = delete;
-    DNS_RData_WKS(uint32_t address, uint8_t protocol, const std::vector<uint8_t> &bitmap);
+    DNS_RData_WKS(uint32_t address, uint8_t protocol, const std::vector<uint8_t>& bitmap)
+        : m_address(address)
+        , m_protocol(protocol)
+        , m_bitmap(bitmap)
+    {
+    }
 
     uint32_t address() const noexcept
     {

@@ -40,6 +40,10 @@ add_library(netpp STATIC
 
     http/router.h
     http/router.cpp
+    http/response.h
+    http/response.cpp
+    http/request.h
+    http/request.cpp
     
     dns/record.h
     dns/record.cpp
