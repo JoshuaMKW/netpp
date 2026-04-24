@@ -20,7 +20,7 @@
 
 using namespace netpp;
 
-#define CLIENT_HOST "google.com"
+#define CLIENT_HOST "8.8.8.8"
 #define CLIENT_KEY "cert/client_key.pem"
 #define CLIENT_USE_DTLS 0
 
@@ -67,6 +67,56 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_TYPE type)
     }
 }
 
+static std::string RRTypeToString(netpp::EDNSQuery_RR_QTYPE type)
+{
+    switch (type) {
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_A:
+        return "A";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_NS:
+        return "NS";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MD:
+        return "MD";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MF:
+        return "MF";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_CNAME:
+        return "CNAME";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_SOA:
+        return "SOA";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MB:
+        return "MB";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MG:
+        return "MG";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MR:
+        return "MR";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_NULL:
+        return "NULL";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_WKS:
+        return "WKS";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_PTR:
+        return "PTR";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_HINFO:
+        return "HINFO";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MINFO:
+        return "MINFO";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_MX:
+        return "MX";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_TXT:
+        return "TXT";
+    case netpp::EDNSQuery_RR_QTYPE::QTYPE_IXFR:
+        return "Q_IXFR";
+    case netpp::EDNSQuery_RR_QTYPE::QTYPE_AXFR:
+        return "Q_AXFR";
+    case netpp::EDNSQuery_RR_QTYPE::QTYPE_MAILA:
+        return "Q_MAILA";
+    case netpp::EDNSQuery_RR_QTYPE::QTYPE_MAILB:
+        return "Q_MAILB";
+    case netpp::EDNSQuery_RR_QTYPE::QTYPE_ALL:
+        return "Q_ALL";
+    default:
+        return "UNKNOWN (" + std::to_string((uint16_t)type) + ")";
+    }
+}
+
 static std::string RRClassToString(netpp::EDNSQuery_RR_CLASS klass)
 {
     switch (klass) {
@@ -83,6 +133,24 @@ static std::string RRClassToString(netpp::EDNSQuery_RR_CLASS klass)
     }
 }
 
+static std::string RRClassToString(netpp::EDNSQuery_RR_QCLASS klass)
+{
+    switch (klass) {
+    case netpp::EDNSQuery_RR_QCLASS::CLASS_IN:
+        return "IN";
+    case netpp::EDNSQuery_RR_QCLASS::CLASS_CS:
+        return "CS";
+    case netpp::EDNSQuery_RR_QCLASS::CLASS_CH:
+        return "CH";
+    case netpp::EDNSQuery_RR_QCLASS::CLASS_HS:
+        return "HS";
+    case netpp::EDNSQuery_RR_QCLASS::QCLASS_ALL:
+        return "Q_ALL";
+    default:
+        return "UNKNOWN (" + std::to_string((uint16_t)klass) + ")";
+    }
+}
+
 static std::string FormatIPv4(uint32_t ip)
 {
     // Because your _DNS_ReadUnaligned32 converts network-to-host byte order,
@@ -90,13 +158,19 @@ static std::string FormatIPv4(uint32_t ip)
     return std::to_string((ip >> 24) & 0xFF) + "." + std::to_string((ip >> 16) & 0xFF) + "." + std::to_string((ip >> 8) & 0xFF) + "." + std::to_string(ip & 0xFF);
 }
 
+static void printDNSQuestion(const netpp::DNS_Question& question)
+{
+    std::cout << "--------------------------------------------------\n";
+    std::cout << std::left << std::setw(12) << "Domain:" << question.name() << "\n";
+    std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(question.type()) << "\n";
+    std::cout << std::left << std::setw(12) << "Class:" << RRClassToString(question.klass()) << "\n";
+}
+
 // ------------------------------------
 // Pretty Print Implementation
 // ------------------------------------
 static void printDNSRecord(const netpp::DNS_Record& record)
 {
-    using namespace netpp;
-
     std::cout << "--------------------------------------------------\n";
     std::cout << std::left << std::setw(12) << "Record:" << record.name() << "\n";
     std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(record.type()) << "\n";
@@ -255,30 +329,114 @@ int main(int argc, char** argv) {
 
   printf("Connected to server (%s:%s)!\n\n", client.hostname().c_str(), client.port().c_str());
 
-  DNS_Question question = DNS_Question("google.com", EDNSQuery_RR_QTYPE::TYPE_A, EDNSQuery_RR_QCLASS::CLASS_IN);
-  
-  DNS_Message* message = DNS_Message::create_query(0xDEAD);
-  message->add_question(question);
-  message->set_flags(0x0100);
-
   std::mutex send_mutex;
   std::condition_variable send_cv;
 
-  client.on_dns_response([](const ISocketPipe* source, const DNS_Message* message) -> DNS_Message* {
-      //DebugBreak();
+  client.on_dns_response([&](const ISocketPipe* source, const DNS_Message* message) -> DNS_Message* {
+      std::cout << "DNS MESSAGE (" << message->id() << ")\n";
+      
+      std::cout << "==== QUESTIONS ====\n";
+      for (const DNS_Question& question : message->questions()) {
+          printDNSQuestion(question);
+      }
+
+      std::cout << "\n==== ANSWERS ====\n";
       for (const DNS_Record& answer : message->answers()) {
           printDNSRecord(answer);
       }
+
+      std::cout << "\n==== AUTHORITATIVES ====\n";
+      for (const DNS_Record& authoritative : message->authoritatives()) {
+          printDNSRecord(authoritative);
+      }
+
+      std::cout << "\n==== ADDITIONALS ====\n";
+      for (const DNS_Record& additional : message->additionals()) {
+          printDNSRecord(additional);
+      }
+
+      std::cout << "\n";
+
+      send_cv.notify_all();
       return nullptr;
   });
 
-  if (!client.send(message)) {
-    fprintf(stderr, "Failed to send message\n");
-    return 1;
+  // Get IPV4 addresses associated with google.com
+  {
+      DNS_Question question = DNS_Question("google.com", EDNSQuery_RR_QTYPE::TYPE_A, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Message* message = DNS_Message::create_query(1);
+      message->add_question(question);
+      message->set_flags(0x0100);
+
+      if (!client.send(message)) {
+          fprintf(stderr, "Failed to send message\n");
+          return 1;
+      }
   }
 
-  std::unique_lock lock(send_mutex);
-  send_cv.wait(lock);
+  // Get the canonical name associated with www.google.com
+  {
+      DNS_Question question = DNS_Question("www.google.com", EDNSQuery_RR_QTYPE::TYPE_CNAME, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Message* message = DNS_Message::create_query(2);
+      message->add_question(question);
+      message->set_flags(0x0100);
+
+      if (!client.send(message)) {
+          fprintf(stderr, "Failed to send message\n");
+          return 1;
+      }
+
+      std::unique_lock lock(send_mutex);
+      send_cv.wait(lock);
+  }
+
+  // Get the Name Server records associated with microsoft.com
+  {
+      DNS_Question question = DNS_Question("microsoft.com", EDNSQuery_RR_QTYPE::TYPE_NS, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Message* message = DNS_Message::create_query(3);
+      message->add_question(question);
+      message->set_flags(0x0100);
+
+      if (!client.send(message)) {
+          fprintf(stderr, "Failed to send message\n");
+          return 1;
+      }
+
+      std::unique_lock lock(send_mutex);
+      send_cv.wait(lock);
+  }
+
+  // Get the long TXT data associated with _dmarc.google.com
+  {
+      DNS_Question question = DNS_Question("_dmarc.google.com", EDNSQuery_RR_QTYPE::TYPE_TXT, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Message* message = DNS_Message::create_query(4);
+      message->add_question(question);
+      message->set_flags(0x0100);
+
+      if (!client.send(message)) {
+          fprintf(stderr, "Failed to send message\n");
+          return 1;
+      }
+
+      std::unique_lock lock(send_mutex);
+      send_cv.wait(lock);
+  }
+
+  // Get the reverse DNS lookup for the ipv4 address
+  {
+      DNS_Question question = DNS_Question(CLIENT_HOST ".in-addr.arpa", EDNSQuery_RR_QTYPE::TYPE_PTR, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Message* message = DNS_Message::create_query(5);
+      message->add_question(question);
+      message->set_flags(0x0100);
+
+      if (!client.send(message)) {
+          fprintf(stderr, "Failed to send message\n");
+          return 1;
+      }
+
+      std::unique_lock lock(send_mutex);
+      send_cv.wait(lock);
+  }
 
   client.stop();
 
