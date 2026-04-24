@@ -17,6 +17,7 @@ add_library(netpp STATIC
     allocator.cpp
     client.cpp
     network.cpp
+    protocol.h
     protocol.cpp
     security.h
     security.cpp
@@ -57,7 +58,7 @@ add_library(netpp STATIC
     dns/record.h
     dns/record.cpp
     http/router.cpp
- )
+)
 
 # Include directories
 target_include_directories(netpp PUBLIC 

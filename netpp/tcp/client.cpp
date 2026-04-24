@@ -224,6 +224,26 @@ namespace netpp {
     return true;
   }
 
+  bool TCP_Client::send(const DNS_Message* message)
+  {
+      if (!is_connected()) {
+          return false;
+      }
+
+      EIOState state = m_server_socket.m_pipe->send(message);
+      if (state == EIOState::E_ERROR) {
+          emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
+          return false;
+      }
+
+      if (state == EIOState::E_BUSY) {
+          emit_error(m_server_socket.m_pipe, EClientError::E_ERROR_SOCKET, (int)ESocketErrorReason::E_REASON_SEND);
+          return false;
+      }
+
+      return true;
+  }
+
   bool TCP_Client::send(const RawPacket* packet) {
     if (!is_connected()) {
       return false;
@@ -487,7 +507,7 @@ namespace netpp {
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, m_security);
+    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, ETransportLayerProtocol::E_TCP, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---

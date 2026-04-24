@@ -68,6 +68,7 @@ namespace netpp {
     virtual void on_sip_response(ISocketPipe::sip_response_cb cb) = 0;
 
     virtual bool send(const HTTP_Request*) = 0;
+    virtual bool send(const DNS_Message*) = 0;
     virtual bool send(const RawPacket*) = 0;
 
   protected:
@@ -111,6 +112,7 @@ namespace netpp {
     void on_sip_response(ISocketPipe::sip_response_cb cb) override { m_server_socket.m_pipe->on_sip_response(cb); }
 
     bool send(const HTTP_Request*) override;
+    bool send(const DNS_Message*) override;
     bool send(const RawPacket*) override;
 
     void set_send_flow_spec(const NetworkFlowSpec* flow_spec) { m_send_spec = flow_spec; }
@@ -202,6 +204,7 @@ namespace netpp {
     void on_sip_response(ISocketPipe::sip_response_cb cb) override { m_server_socket.m_pipe->on_sip_response(cb); }
 
     bool send(const HTTP_Request*) override;
+    bool send(const DNS_Message*) override;
     bool send(const RawPacket*) override;
 
     void set_send_flow_spec(const NetworkFlowSpec* flow_spec) { m_send_spec = flow_spec; }

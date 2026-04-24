@@ -458,7 +458,7 @@ IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketProcData& data, c
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, m_security);
+    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, ETransportLayerProtocol::E_TCP, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---

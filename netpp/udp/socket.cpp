@@ -311,6 +311,7 @@ namespace netpp {
       memcpy_s(proc_buf, in_size, in_data, in_size);
       *out_data = proc_buf;
       *out_size = in_size;
+      *recv_digested = in_size;
       return EProcState::E_SUCCEEDED;
     }
 
@@ -336,6 +337,8 @@ namespace netpp {
     case ESecurityState::E_WANTS_DATA:
       return EProcState::E_WANTS_DATA;
     }
+
+    return EProcState::E_FAILED;
   }
 
 }  // namespace netpp

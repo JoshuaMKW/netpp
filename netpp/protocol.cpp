@@ -10,53 +10,6 @@
 
 namespace netpp {
 
-  bool DNS_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
-      if (DNS_Message::is_data_query(data, size)) {
-          DNS_Message* message = DNS_Message::create(data, size);
-          if (!message) {
-              return false;
-          }
-
-          const DNS_Message* response = pipe->signal_dns_request(message);
-          if (response) {
-              pipe->send(response);
-              delete response;
-          }
-
-          delete message;
-          return true;
-      }
-
-      if (DNS_Message::is_data_response(data, size)) {
-          DNS_Message* message = DNS_Message::create(data, size);
-          if (!message) {
-              return false;
-          }
-
-          const DNS_Message* request = pipe->signal_dns_response(message);
-          if (request) {
-              pipe->send(request);
-              delete request;
-          }
-
-          delete message;
-          return true;
-      }
-      return false;
-  }
-
-  uint32_t DNS_ApplicationAdapter::calc_size(const char* data, uint32_t size) const {
-    return 0;
-  }
-
-  uint32_t DNS_ApplicationAdapter::calc_proc_size(const char* data, uint32_t size) const {
-    return 0;
-  }
-
-  bool DNS_ApplicationAdapter::wants_more_data(const char* data, uint32_t size) const {
-    return false;
-  }
-
   bool RAW_ApplicationAdapter::on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) {
     if (data == nullptr || size <= 4) {
       return false;
@@ -133,10 +86,10 @@ namespace netpp {
     return false;
   }
 
-  IApplicationLayerAdapter* ApplicationAdapterFactory::create(EApplicationLayerProtocol protocol) {
+  IApplicationLayerAdapter* ApplicationAdapterFactory::create(EApplicationLayerProtocol protocol, ETransportLayerProtocol transport) {
     switch (protocol) {
     case EApplicationLayerProtocol::E_DNS:
-      return new DNS_ApplicationAdapter();
+      return new DNS_ApplicationAdapter(transport == ETransportLayerProtocol::E_TCP);
     case EApplicationLayerProtocol::E_HTTP:
       return new HTTP_ApplicationAdapter();
     case EApplicationLayerProtocol::E_HTTPS:
@@ -154,7 +107,8 @@ namespace netpp {
     }
   }
 
-  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, ISecurityFactory *security) {
+  IApplicationLayerAdapter* ApplicationAdapterFactory::detect(const char* data, uint32_t size, ETransportLayerProtocol transport, ISecurityFactory* security)
+  {
     EApplicationLayerProtocol protocol = EApplicationLayerProtocol::E_RAW;
     // Check here for HTTPS
 
@@ -166,7 +120,7 @@ namespace netpp {
       protocol = EApplicationLayerProtocol::E_DNS;
     }
 
-    return create(protocol);
+    return create(protocol, transport);
   }
 
 }  // namespace netpp

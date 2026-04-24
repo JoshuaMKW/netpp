@@ -71,6 +71,7 @@ enum class EDNSQuery_RR_QCLASS : uint16_t {
     QCLASS_ALL = 255, // Any Class
 };
 
+// Opaque base for inherited instances that represent each RDATA
 class DNS_RData { };
 
 class DNS_Question {
@@ -79,6 +80,10 @@ public:
 
     DNS_Question() = delete;
     DNS_Question(const std::string& name, EDNSQuery_RR_QTYPE type, EDNSQuery_RR_QCLASS klass);
+
+    const std::string& name() const noexcept { return m_name; }
+    EDNSQuery_RR_QCLASS klass() const noexcept { return m_class; }
+    EDNSQuery_RR_QTYPE type() const noexcept { return m_type; }
 
 private:
     std::string m_name;
@@ -92,6 +97,12 @@ public:
 
     DNS_Record() = delete;
     DNS_Record(const std::string& name, EDNSQuery_RR_TYPE type, EDNSQuery_RR_CLASS klass, uint32_t ttl, DNS_RData* data);
+
+    const std::string& name() const noexcept { return m_name; }
+    EDNSQuery_RR_CLASS klass() const noexcept { return m_class; }
+    EDNSQuery_RR_TYPE type() const noexcept { return m_type; }
+    uint32_t ttl() const noexcept { return m_ttl; }
+    const DNS_RData* rdata() const noexcept { return m_rdata; }
 
 private:
     std::string m_name;
@@ -113,11 +124,22 @@ public:
     static bool is_data_query(const char* msg_buf, uint32_t buf_size);
     static bool is_data_response(const char* msg_buf, uint32_t buf_size);
 
-    static DNS_Message* create_query();
-    static DNS_Message* create_response();
+    static DNS_Message* create_query(uint16_t transaction_id);
+    static DNS_Message* create_response(const DNS_Message* query);
     static DNS_Message* create(const char* dns_buf, int buflen);
 
     static const char* build_buf(const DNS_Message& msg, uint32_t* size_out);
+    
+    void set_id(uint16_t id) { m_id = id; }
+    uint16_t id() const { return m_id; }
+
+    void set_flags(uint16_t flags) { m_flags = flags; }
+    uint16_t flags() const { return m_flags; }
+
+    void add_question(const DNS_Question& q) { m_questions.push_back(q); }
+    void add_answer(const DNS_Record& r) { m_answers.push_back(r); }
+    void add_authoritative(const DNS_Record& r) { m_authoritatives.push_back(r); }
+    void add_additional(const DNS_Record& r) { m_additionals.push_back(r); }
 
     const std::vector<DNS_Question>& questions() const { return m_questions; }
     const std::vector<DNS_Record>& answers() const { return m_answers; }
@@ -125,6 +147,8 @@ public:
     const std::vector<DNS_Record>& additionals() const { return m_additionals; }
 
 private:
+    uint16_t m_id;
+    uint16_t m_flags;
     std::vector<DNS_Question> m_questions;
     std::vector<DNS_Record> m_answers;
     std::vector<DNS_Record> m_authoritatives;
