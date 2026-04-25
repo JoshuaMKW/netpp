@@ -922,8 +922,6 @@ DNS_Message* DNS_Message::create(const char* dns_buf, int buflen)
         return nullptr;
     }
 
-    DNS_Message* result = new DNS_Message;
-
     const void* next_section = nullptr; // Used for incrementing pointers
 
     const uint16_t message_id = DNSQuery_MessageHeader_GetID(header);
@@ -963,6 +961,10 @@ DNS_Message* DNS_Message::create(const char* dns_buf, int buflen)
 
         return DNS_Record(answer_name, answer_type, answer_class, answer_ttl, answer_rdata);
     };
+
+    DNS_Message* result = new DNS_Message();
+    result->m_id = message_id;
+    result->m_flags = message_flags;
 
     // Process question entries
     for (uint16_t i = 0; i < message_qdcount; ++i) {
