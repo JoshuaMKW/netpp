@@ -32,6 +32,8 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_TYPE type)
     switch (type) {
     case netpp::EDNSQuery_RR_TYPE::TYPE_A:
         return "A";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_AAAA:
+        return "AAAA";
     case netpp::EDNSQuery_RR_TYPE::TYPE_NS:
         return "NS";
     case netpp::EDNSQuery_RR_TYPE::TYPE_MD:
@@ -62,6 +64,8 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_TYPE type)
         return "MX";
     case netpp::EDNSQuery_RR_TYPE::TYPE_TXT:
         return "TXT";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_DNSKEY:
+        return "DNSKEY";
     default:
         return "UNKNOWN (" + std::to_string((uint16_t)type) + ")";
     }
@@ -72,6 +76,8 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_QTYPE type)
     switch (type) {
     case netpp::EDNSQuery_RR_QTYPE::TYPE_A:
         return "A";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_AAAA:
+        return "AAAA";
     case netpp::EDNSQuery_RR_QTYPE::TYPE_NS:
         return "NS";
     case netpp::EDNSQuery_RR_QTYPE::TYPE_MD:
@@ -102,6 +108,8 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_QTYPE type)
         return "MX";
     case netpp::EDNSQuery_RR_QTYPE::TYPE_TXT:
         return "TXT";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_DNSKEY:
+        return "DNSKEY";
     case netpp::EDNSQuery_RR_QTYPE::QTYPE_IXFR:
         return "Q_IXFR";
     case netpp::EDNSQuery_RR_QTYPE::QTYPE_AXFR:
@@ -151,13 +159,6 @@ static std::string RRClassToString(netpp::EDNSQuery_RR_QCLASS klass)
     }
 }
 
-static std::string FormatIPv4(uint32_t ip)
-{
-    // Because your _DNS_ReadUnaligned32 converts network-to-host byte order,
-    // logical bitshifts will correctly extract the octets regardless of system endianness.
-    return std::to_string((ip >> 24) & 0xFF) + "." + std::to_string((ip >> 16) & 0xFF) + "." + std::to_string((ip >> 8) & 0xFF) + "." + std::to_string(ip & 0xFF);
-}
-
 static void printDNSQuestion(const netpp::DNS_Question& question)
 {
     std::cout << "--------------------------------------------------\n";
@@ -186,7 +187,12 @@ static void printDNSRecord(const netpp::DNS_Record& record)
     switch (record.type()) {
     case EDNSQuery_RR_TYPE::TYPE_A: {
         auto* rdata = static_cast<const DNS_RData_A*>(record.rdata());
-        std::cout << "  Address:    " << FormatIPv4(rdata->address()) << "\n";
+        std::cout << "  Address:    " << rdata->ipv4() << "\n";
+        break;
+    }
+    case EDNSQuery_RR_TYPE::TYPE_AAAA: {
+        auto* rdata = static_cast<const DNS_RData_AAAA*>(record.rdata());
+        std::cout << "  Address:    " << rdata->ipv6() << "\n";
         break;
     }
     case EDNSQuery_RR_TYPE::TYPE_CNAME: {
@@ -268,11 +274,25 @@ static void printDNSRecord(const netpp::DNS_Record& record)
     }
     case EDNSQuery_RR_TYPE::TYPE_WKS: {
         auto* rdata = static_cast<const DNS_RData_WKS*>(record.rdata());
-        std::cout << "  Address:    " << FormatIPv4(rdata->address()) << "\n";
+        std::cout << "  Address:    " << rdata->ipv4() << "\n";
         std::cout << "  Protocol:   " << (int)rdata->protocol() << "\n";
 
         std::cout << "  Bitmap:     [ ";
         for (uint8_t byte : rdata->bitmap()) {
+            // Print as zero-padded hex
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
+        }
+        std::cout << std::dec << std::setfill(' ') << "]\n"; // Reset stream state
+        break;
+    }
+    case EDNSQuery_RR_TYPE::TYPE_DNSKEY: {
+        auto* rdata = static_cast<const DNS_RData_DNSKEY*>(record.rdata());
+        std::cout << "  Flags:    " << rdata->flags() << "\n";
+        std::cout << "  Protocol:   " << (int)rdata->protocol() << "\n";
+        std::cout << "  Algorithm:   " << (int)rdata->algorithm() << "\n";
+
+        std::cout << "  Bitmap:     [ ";
+        for (uint8_t byte : rdata->pubkey()) {
             // Print as zero-padded hex
             std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
         }
@@ -321,8 +341,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const char* hostname = get_ip_address_info(CLIENT_HOST).m_ipv4;
-  if (!client.connect(hostname, "53")) {
+  HostIPInfo ip_info = get_ip_address_info(CLIENT_HOST);
+  if (!client.connect(ip_info.m_ipv4, "53")) {
     fprintf(stderr, "Failed to connect to the server\n");
     return 1;
   }
@@ -363,7 +383,7 @@ int main(int argc, char** argv) {
 
   // Get IPV4 addresses associated with google.com
   {
-      DNS_Question question = DNS_Question("google.com", EDNSQuery_RR_QTYPE::TYPE_A, EDNSQuery_RR_QCLASS::CLASS_IN);
+      DNS_Question question = DNS_Question("google.com", EDNSQuery_RR_QTYPE::TYPE_DNSKEY, EDNSQuery_RR_QCLASS::CLASS_IN);
       DNS_Message* message = DNS_Message::create_query(1);
       message->add_question(question);
       message->set_flags(0x0100);
@@ -424,7 +444,9 @@ int main(int argc, char** argv) {
 
   // Get the reverse DNS lookup for the ipv4 address
   {
-      DNS_Question question = DNS_Question(CLIENT_HOST ".in-addr.arpa", EDNSQuery_RR_QTYPE::TYPE_PTR, EDNSQuery_RR_QCLASS::CLASS_IN);
+      std::string bruhbruhbruh = get_reverse_lookup_domain_name(ip_info.m_ipv4);
+
+      DNS_Question question = DNS_Question(bruhbruhbruh.c_str(), EDNSQuery_RR_QTYPE::TYPE_PTR, EDNSQuery_RR_QCLASS::CLASS_IN);
       DNS_Message* message = DNS_Message::create_query(5);
       message->add_question(question);
       message->set_flags(0x0100);

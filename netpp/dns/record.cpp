@@ -1,6 +1,6 @@
 // ------------------------------------
 // The following code is based on
-// RFC1035 and the Microsoft Docs
+// RFC1002, RFC1035, ..., and the Microsoft Docs
 // ------------------------------------
 // Authored by JoshuaMK
 // ------------------------------------
@@ -9,8 +9,8 @@
 #include <string>
 #include <type_traits>
 
-#include "netpp/netpp.h"
 #include "netpp/dns/record.h"
+#include "netpp/netpp.h"
 #include "netpp/protocol.h"
 #include "netpp/socket.h"
 
@@ -53,6 +53,13 @@ static uint32_t _DNS_ReadUnaligned32(const void* ptr)
     return NETPP_NETWORK_TO_SYSTEM_ENDIAN(val);
 }
 
+static uint64_t _DNS_ReadUnaligned64(const void* ptr)
+{
+    uint64_t val;
+    std::memcpy(&val, ptr, sizeof(uint64_t));
+    return NETPP_NETWORK_TO_SYSTEM_ENDIAN(val);
+}
+
 static void _DNS_WriteUnaligned16(void* ptr, uint16_t val)
 {
     uint16_t net_val = NETPP_SYSTEM_TO_NETWORK_ENDIAN(val);
@@ -63,6 +70,12 @@ static void _DNS_WriteUnaligned32(void* ptr, uint32_t val)
 {
     uint32_t net_val = NETPP_SYSTEM_TO_NETWORK_ENDIAN(val);
     std::memcpy(ptr, &net_val, sizeof(uint32_t));
+}
+
+static void _DNS_WriteUnaligned64(void* ptr, uint64_t val)
+{
+    uint64_t net_val = NETPP_SYSTEM_TO_NETWORK_ENDIAN(val);
+    std::memcpy(ptr, &net_val, sizeof(uint64_t));
 }
 
 // ------------------------------------
@@ -83,7 +96,6 @@ static int DNS_StringCompareInsensitive(const std::string& l, const std::string&
         return (int)(l.size() - r.size());
     }
     return difference;
-
 }
 
 struct DNSQuery_MessageHeader { };
@@ -230,7 +242,8 @@ static uint16_t DNSQuery_MessageHeader_GetID(const DNSQuery_MessageHeader* h)
     return _DNS_ReadUnaligned16(h);
 }
 
-static void DNSQuery_MessageHeader_SetID(DNSQuery_MessageHeader* h, uint16_t id) {
+static void DNSQuery_MessageHeader_SetID(DNSQuery_MessageHeader* h, uint16_t id)
+{
     _DNS_WriteUnaligned16(h, id);
 }
 
@@ -491,7 +504,7 @@ static std::vector<std::string> DNSQuery_RDATA_GetTXT_TXTDATA(const DNSQuery_RDA
         result.emplace_back(std::move(DNSQuery_GetCharacterString(strptr + marker)));
         marker += DNSQuery_GetCharacterStringLength(strptr + marker);
     } while (marker < rdlength);
-    
+
     return result;
 }
 
@@ -525,7 +538,8 @@ static void DNSQuery_RDATA_SetWKS_PROTOCOL(DNSQuery_RDATA* rdata, uint8_t protoc
     ((uint8_t*)rdata)[4] = protocol;
 }
 
-static std::vector<uint8_t> DNSQuery_RDATA_GetWKS_BITMAP(const DNSQuery_RDATA* rdata, uint16_t rdlength) {
+static std::vector<uint8_t> DNSQuery_RDATA_GetWKS_BITMAP(const DNSQuery_RDATA* rdata, uint16_t rdlength)
+{
 
     uint8_t* wks_bits = (uint8_t*)rdata + 5;
     return std::vector(wks_bits, wks_bits + (rdlength - 5));
@@ -568,23 +582,149 @@ static void DNSQuery_RDATA_SetWKS_BIT(DNSQuery_RDATA* rdata, uint16_t rlen, uint
     }
 }
 
+static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_UPPER(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned64(rdata);
+}
+
+static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_LOWER(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned64(_DNS_OffsetPtr<void>(rdata, 8));
+}
+
+static void DNSQuery_RDATA_SetAAAA_ADDRESS(DNSQuery_RDATA* rdata, uint64_t upper, uint64_t lower)
+{
+    _DNS_WriteUnaligned64(rdata, upper);
+    _DNS_WriteUnaligned64(_DNS_OffsetPtr<void>(rdata, 8), upper);
+}
+
+static uint16_t DNSQuery_RDATA_GetRRSIG_TYPECOVERED(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned16(rdata);
+}
+
+static void DNSQuery_RDATA_SetRRSIG_TYPECOVERED(DNSQuery_RDATA* rdata, uint16_t type_covered)
+{
+    _DNS_WriteUnaligned16(rdata, type_covered);
+}
+
+static uint8_t DNSQuery_RDATA_GetRRSIG_ALGORITHM(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
+}
+
+static void DNSQuery_RDATA_SetRRSIG_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = algorithm;
+}
+
+static uint8_t DNSQuery_RDATA_GetRRSIG_LABELS(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
+}
+
+static void DNSQuery_RDATA_SetRRSIG_LABELS(DNSQuery_RDATA* rdata, uint8_t labels)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = labels;
+}
+
+static uint32_t DNSQuery_RDATA_GetRRSIG_ORIGINALTTL(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 4));
+}
+
+static void DNSQuery_RDATA_SetRRSIG_ORIGINALTTL(DNSQuery_RDATA* rdata, uint32_t ttl)
+{
+    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 4), ttl);
+}
+
+static uint32_t DNSQuery_RDATA_GetRRSIG_SIGEXPIRIATION(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 8));
+}
+
+static void DNSQuery_RDATA_SetRRSIG_SIGEXPIRIATION(DNSQuery_RDATA* rdata, uint32_t expiration)
+{
+    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 8), expiration);
+}
+
+static uint32_t DNSQuery_RDATA_GetRRSIG_SIGINCEPTION(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 12));
+}
+
+static void DNSQuery_RDATA_SetRRSIG_SIGINCEPTION(DNSQuery_RDATA* rdata, uint32_t inception)
+{
+    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 12), inception);
+}
+
+static uint16_t DNSQuery_RDATA_GetRRSIG_KEYTAG(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(rdata, 16));
+}
+
+static void DNSQuery_RDATA_SetRRSIG_KEYTAG(DNSQuery_RDATA* rdata, uint16_t keytag)
+{
+    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(rdata, 16), keytag);
+}
+
+static std::string DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(const DNSQuery_RDATA* rdata)
+{
+    return DNSQuery_GetCharacterString(_DNS_OffsetPtr<uint8_t>(rdata, 18));
+}
+
+static std::vector<uint8_t> DNSQuery_RDATA_GetRRSIG_SIGNATURE(const DNSQuery_RDATA* rdata, uint16_t rdlength)
+{
+    const uint16_t signers_name_len = DNSQuery_GetCharacterStringLength((uint8_t *)rdata);
+    const uint8_t* signature_ptr = _DNS_OffsetPtr<uint8_t>(rdata, 18 + signers_name_len);
+
+    const uint16_t signature_len = rdlength - (18 + signers_name_len);
+    return std::vector(signature_ptr, signature_ptr + signature_len);
+}
+
+#define DNSKEY_FLAGS_HOLDS_ZONE_KEY(flags) ((bool)(((flags) >> 8) & 0b1))
+#define DNSKEY_FLAGS_IS_SECURE_ENTRY_POINT(flags) ((bool)((flags) & 0b1))
+
+static uint16_t DNSQuery_RDATA_GetDNSKEY_FLAGS(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned16(rdata);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_FLAGS(DNSQuery_RDATA* rdata, uint16_t flags)
+{
+    _DNS_WriteUnaligned16(rdata, flags);
+}
+
+static uint8_t DNSQuery_RDATA_GetDNSKEY_PROTOCOL(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_PROTOCOL(DNSQuery_RDATA* rdata, uint8_t protocol)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = protocol;
+}
+
+static uint8_t DNSQuery_RDATA_GetDNSKEY_ALGORITHM(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = algorithm;
+}
+
+static std::vector<uint8_t> DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(const DNSQuery_RDATA* rdata, uint16_t rdlength)
+{
+    const uint8_t* pubkey = _DNS_OffsetPtr<uint8_t>(rdata, 4);
+    return std::vector(pubkey, pubkey + rdlength - 4);
+}
+
 // ------------------------
 
 enum class EDNSQuery_TransactionType {
 
-};
-
-enum class EDNSQuery_OperationCode {
-    OPERATION_QUERY = 0,
-};
-
-enum class EDNSQuery_ReturnCode {
-    RETURN_SUCCESS = 0,
-    RETURN_FORMAT_ERROR = 1,
-    RETURN_SERVER_FAILURE = 2,
-    RETURN_NAME_ERROR = 3,
-    RETURN_NOT_IMPLEMENTED = 4,
-    RETURN_REFUSED = 5,
 };
 
 // ---------------------
@@ -713,6 +853,335 @@ static uint16_t DNSQuery_ResourceRecord_GetDataSize(const DNSQuery_MessageHeader
 
 namespace netpp {
 
+static bool IsAddressIPV4(const char* ip_addr)
+{
+    const int str_len = strnlen(ip_addr, IPV6_MAX_SIZE);
+    if (str_len > IPV4_MAX_SIZE) {
+        return false;
+    }
+
+    const char* seg_ptr = ip_addr;
+    int segments_found = 0;
+    while (segments_found < 4) {
+        const char* seg_end = strchr(seg_ptr, '.');
+        if (!seg_end) {
+            if (segments_found < 3) {
+                return false; // Not enough segments have been processed
+            }
+
+            seg_end = ip_addr + str_len;
+        } else {
+            if (segments_found == 3) {
+                return false; // More than four segments to be processed
+            }
+        }
+
+        int digits = std::distance(seg_ptr, seg_end);
+        if (digits == 0 || digits > 3) {
+            return false; // Each octet is only up to 3 characters
+        }
+
+        int octet = 0;
+        for (int i = 0; i < digits; ++i) {
+            if (!isdigit(seg_ptr[i])) {
+                return false; // Each octet is decimal only
+            }
+            octet = (octet * 10) + (seg_ptr[i] - '0');
+        }
+
+        if (octet > 255) {
+            return false; // Octets are up to 255
+        }
+
+        segments_found += 1;
+        seg_ptr = seg_end + 1;
+    }
+
+    return std::distance(ip_addr, seg_ptr) >= str_len;
+}
+
+static bool IsAddressIPV6(const char* ip_addr)
+{
+    if (!ip_addr) {
+        return false;
+    }
+
+    // A standard IPv6 string cannot exceed 39 characters
+    const int str_len = strnlen(ip_addr, IPV6_MAX_SIZE + 1);
+    if (str_len < 2 || str_len > IPV6_MAX_SIZE) {
+        return false;
+    }
+
+    int segments = 0;
+    int current_hex_digits = 0;
+    bool has_double_colon = false;
+
+    for (int i = 0; i < str_len; ++i) {
+        char c = ip_addr[i];
+
+        if (isxdigit(c)) {
+            current_hex_digits++;
+            if (current_hex_digits > 4) {
+                return false; // Maximum of 4 hex digits per segment
+            }
+        } else if (c == ':') {
+            if (i > 0 && ip_addr[i - 1] == ':') {
+                // We found a double colon "::"
+                if (has_double_colon) {
+                    return false; // Only one "::" is permitted per address
+                }
+                has_double_colon = true;
+            } else {
+                // It's a regular colon.
+                // If it's the very first character, it's invalid unless followed by another ':'
+                if (i == 0 && i + 1 < str_len && ip_addr[i + 1] != ':') {
+                    return false;
+                }
+
+                // If we had digits before this colon, a segment is complete
+                if (current_hex_digits > 0) {
+                    segments++;
+                    current_hex_digits = 0;
+                }
+            }
+        } else {
+            return false; // Invalid character found (e.g., '.', '-', letters beyond 'f')
+        }
+    }
+
+    // Account for the final segment if the string ended in digits
+    if (current_hex_digits > 0) {
+        segments++;
+    } else if (str_len > 0 && ip_addr[str_len - 1] == ':' && ip_addr[str_len - 2] != ':') {
+        // The address ends with a single colon (e.g., "1:2:3:"), which is invalid format
+        return false;
+    }
+
+    // A valid IPv6 has exactly 8 segments, OR less than 8 if zero compression (::) was used
+    if (has_double_colon) {
+        return segments < 8;
+    } else {
+        return segments == 8;
+    }
+}
+
+static std::string ReverseLookupIPV4(const char* ip_addr)
+{
+    const int str_len = strnlen(ip_addr, IPV4_MAX_SIZE);
+
+    std::string lookup_name(str_len, '\0');
+    int lookup_name_idx = (int)lookup_name.size();
+
+    lookup_name.append(".in-addr.arpa");
+
+    const char* seg_ptr = ip_addr;
+    int segments_found = 0;
+    while (segments_found < 4) {
+        const char* seg_end = strchr(seg_ptr, '.');
+        if (!seg_end) {
+            seg_end = ip_addr + str_len;
+        }
+
+        int digits = std::distance(seg_ptr, seg_end);
+        lookup_name_idx -= digits;
+
+        strncpy(lookup_name.data() + lookup_name_idx, seg_ptr, digits);
+        if (lookup_name_idx > 1) { // Write the . if theres more left
+            lookup_name.data()[--lookup_name_idx] = '.';
+        }
+
+        segments_found += 1;
+        seg_ptr = seg_end + 1;
+    }
+
+    return lookup_name;
+}
+
+static std::string ReverseLookupIPV6(const char* ip_addr)
+{
+    if (!ip_addr)
+        return "";
+
+    // 1. Parse into 8 blocks (required to expand "::" before formatting)
+    uint16_t blocks[8] = { 0 };
+    int num_blocks = 0;
+    int gap_idx = -1;
+    const char* ptr = ip_addr;
+
+    if (ptr[0] == ':' && ptr[1] == ':') {
+        gap_idx = 0;
+        ptr += 2;
+    }
+
+    while (*ptr) {
+        int hex_val = 0;
+        int digits = 0;
+        while (isxdigit(*ptr)) {
+            if (digits >= 4)
+                return "";
+            int val = isdigit(*ptr) ? (*ptr - '0') : (tolower(*ptr) - 'a' + 10);
+            hex_val = (hex_val << 4) | val;
+            ptr++;
+            digits++;
+        }
+        if (digits > 0)
+            blocks[num_blocks++] = static_cast<uint16_t>(hex_val);
+
+        if (*ptr == ':') {
+            ptr++;
+            if (*ptr == ':') {
+                if (gap_idx != -1)
+                    return "";
+                gap_idx = num_blocks;
+                ptr++;
+            } else if (*ptr == '\0') {
+                return "";
+            }
+        } else if (*ptr != '\0') {
+            return "";
+        }
+    }
+
+    // Expand the zero-compression gap
+    if (gap_idx != -1) {
+        int missing = 8 - num_blocks;
+        if (missing < 0)
+            return "";
+        for (int i = num_blocks - 1; i >= gap_idx; --i) {
+            blocks[i + missing] = blocks[i];
+        }
+        for (int i = 0; i < missing; ++i) {
+            blocks[gap_idx + i] = 0;
+        }
+    } else if (num_blocks != 8) {
+        return "";
+    }
+
+    // 2. Format backwards using manual buffer indexing
+    // 32 hex nibbles + 32 dots = exactly 64 characters for the prefix.
+    std::string lookup_name(64, '\0');
+    int lookup_name_idx = (int)lookup_name.size();
+
+    // Append the suffix (it attaches immediately after the 64th character)
+    // We use "ip6.arpa" (no leading dot) because the 64th char will be the final dot.
+    lookup_name.append("ip6.arpa");
+
+    const char hex_chars[] = "0123456789abcdef";
+
+    // Read blocks left-to-right (Block 0 is the most significant)
+    for (int i = 0; i < 8; ++i) {
+        uint16_t block = blocks[i];
+
+        // Read nibbles left-to-right (High nibble down to low nibble)
+        for (int nibble = 3; nibble >= 0; --nibble) {
+            int val = (block >> (nibble * 4)) & 0xF;
+
+            // Move index backwards by 2 (one for the dot, one for the hex char)
+            lookup_name_idx -= 2;
+
+            // Write directly into the buffer, mimicking the strncpy approach
+            lookup_name.data()[lookup_name_idx] = hex_chars[val];
+            lookup_name.data()[lookup_name_idx + 1] = '.';
+        }
+    }
+
+    return lookup_name;
+}
+
+std::string
+get_reverse_lookup_domain_name(const char* ip_addr)
+{
+    if (IsAddressIPV4(ip_addr)) {
+        return ReverseLookupIPV4(ip_addr);
+    }
+
+    if (IsAddressIPV6(ip_addr)) {
+        return ReverseLookupIPV6(ip_addr);
+    }
+
+    return std::string();
+}
+
+std::string DNS_RData_A::ipv4() const
+{
+    return std::to_string((m_address >> 24) & 0xFF) + "." + std::to_string((m_address >> 16) & 0xFF) + "." + std::to_string((m_address >> 8) & 0xFF) + "." + std::to_string(m_address & 0xFF);
+}
+
+std::string DNS_RData_WKS::ipv4() const
+{
+    return std::to_string((m_address >> 24) & 0xFF) + "." + std::to_string((m_address >> 16) & 0xFF) + "." + std::to_string((m_address >> 8) & 0xFF) + "." + std::to_string(m_address & 0xFF);
+}
+
+std::string DNS_RData_AAAA::ipv6() const
+{
+    const uint16_t blocks[8] = {
+        static_cast<uint16_t>(m_upper >> 48),
+        static_cast<uint16_t>(m_upper >> 32),
+        static_cast<uint16_t>(m_upper >> 16),
+        static_cast<uint16_t>(m_upper),
+        static_cast<uint16_t>(m_lower >> 48),
+        static_cast<uint16_t>(m_lower >> 32),
+        static_cast<uint16_t>(m_lower >> 16),
+        static_cast<uint16_t>(m_lower)
+    };
+
+    // Find the longest consecutive run of zero blocks
+    int max_zero_start = -1;
+    int max_zero_len = 0;
+    int current_zero_start = -1;
+    int current_zero_len = 0;
+
+    for (int i = 0; i < 8; ++i) {
+        if (blocks[i] == 0) {
+            if (current_zero_start == -1) {
+                current_zero_start = i;
+            }
+            current_zero_len++;
+        } else {
+            if (current_zero_len > max_zero_len) {
+                max_zero_len = current_zero_len;
+                max_zero_start = current_zero_start;
+            }
+            current_zero_start = -1;
+            current_zero_len = 0;
+        }
+    }
+    // Catch if the zero run goes all the way to the end of the array
+    if (current_zero_len > max_zero_len) {
+        max_zero_len = current_zero_len;
+        max_zero_start = current_zero_start;
+    }
+
+    // RFC 5952 Rule: "::" must not be used to shorten a single 16-bit 0 block
+    if (max_zero_len <= 1) {
+        max_zero_start = -1;
+    }
+
+    std::string result;
+    result.reserve(IPV6_MAX_SIZE);
+    char buf[5]; // Max size of a 16-bit hex string is 4 chars + null terminator
+
+    for (int i = 0; i < 8; ++i) {
+        if (i == max_zero_start) {
+            result += "::";
+            i += max_zero_len - 1; // Advance the iterator to the end of the zero run
+            continue;
+        }
+
+        // Add a colon separator, EXCEPT:
+        // - At the very beginning (i == 0)
+        // - Immediately after a "::" was placed
+        if (i != 0 && i != (max_zero_start + max_zero_len)) {
+            result += ":";
+        }
+
+        snprintf(buf, sizeof(buf), "%x", blocks[i]);
+        result += buf;
+    }
+
+    return result;
+}
+
 static DNS_RData* ParseRData(const DNSQuery_MessageHeader* header, EDNSQuery_RR_TYPE type, EDNSQuery_RR_CLASS klass, uint32_t rdlength, const DNSQuery_RDATA* rdata)
 {
     switch (type) {
@@ -721,6 +1190,11 @@ static DNS_RData* ParseRData(const DNSQuery_MessageHeader* header, EDNSQuery_RR_
     case EDNSQuery_RR_TYPE::TYPE_A: {
         const uint32_t address = DNSQuery_RDATA_GetA_ADDRESS(rdata);
         return new DNS_RData_A(address);
+    }
+    case EDNSQuery_RR_TYPE::TYPE_AAAA: {
+        const uint64_t upper = DNSQuery_RDATA_GetAAAA_ADDRESS_UPPER(rdata);
+        const uint64_t lower = DNSQuery_RDATA_GetAAAA_ADDRESS_LOWER(rdata);
+        return new DNS_RData_AAAA(upper, lower);
     }
     case EDNSQuery_RR_TYPE::TYPE_CNAME: {
         const std::string cname = DNSQuery_RDATA_GetCNAME(header, rdata);
@@ -762,7 +1236,7 @@ static DNS_RData* ParseRData(const DNSQuery_MessageHeader* header, EDNSQuery_RR_
         return new DNS_RData_MX(preference, exchange);
     }
     case EDNSQuery_RR_TYPE::TYPE_NULL: {
-        const uint8_t *anything = DNSQuery_RDATA_GetNULL_Format<uint8_t>(rdata, rdlength);
+        const uint8_t* anything = DNSQuery_RDATA_GetNULL_Format<uint8_t>(rdata, rdlength);
         return new DNS_RData_NULL(std::vector<uint8_t>(anything, anything + rdlength));
     }
     case EDNSQuery_RR_TYPE::TYPE_NS: {
@@ -792,6 +1266,20 @@ static DNS_RData* ParseRData(const DNSQuery_MessageHeader* header, EDNSQuery_RR_
         const uint8_t protocol = DNSQuery_RDATA_GetWKS_PROTOCOL(rdata);
         const std::vector<uint8_t> bitmap = DNSQuery_RDATA_GetWKS_BITMAP(rdata, rdlength);
         return new DNS_RData_WKS(address, protocol, bitmap);
+    }
+    case EDNSQuery_RR_TYPE::TYPE_RRSIG: {
+        const uint32_t address = DNSQuery_RDATA_GetDNSKEY_FLAGS(rdata);
+        const uint8_t protocol = DNSQuery_RDATA_GetDNSKEY_PROTOCOL(rdata);
+        const uint8_t algorithm = DNSQuery_RDATA_GetDNSKEY_ALGORITHM(rdata);
+        const std::vector<uint8_t> bitmap = DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(rdata, rdlength);
+        return new DNS_RData_DNSKEY(address, protocol, algorithm, bitmap);
+    }
+    case EDNSQuery_RR_TYPE::TYPE_DNSKEY: {
+        const uint32_t address = DNSQuery_RDATA_GetDNSKEY_FLAGS(rdata);
+        const uint8_t protocol = DNSQuery_RDATA_GetDNSKEY_PROTOCOL(rdata);
+        const uint8_t algorithm = DNSQuery_RDATA_GetDNSKEY_ALGORITHM(rdata);
+        const std::vector<uint8_t> bitmap = DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(rdata, rdlength);
+        return new DNS_RData_DNSKEY(address, protocol, algorithm, bitmap);
     }
     }
 }
@@ -1073,6 +1561,11 @@ const char* DNS_Message::build_buf(const DNS_Message& msg, uint32_t* size_out)
         out.resize(out.size() + 4);
         _DNS_WriteUnaligned32(out.data() + offset, val);
     };
+    auto Push64 = [](std::vector<uint8_t>& out, uint64_t val) {
+        size_t offset = out.size();
+        out.resize(out.size() + 8);
+        _DNS_WriteUnaligned64(out.data() + offset, val);
+    };
 
     for (const DNS_Question& question : msg.m_questions) {
         StoreDomainNameWithAdvance(dyn_buf, question.m_name);
@@ -1100,6 +1593,12 @@ const char* DNS_Message::build_buf(const DNS_Message& msg, uint32_t* size_out)
             case EDNSQuery_RR_TYPE::TYPE_A:
                 Push32(dyn_buf, static_cast<const DNS_RData_A*>(record.m_rdata)->address());
                 break;
+            case EDNSQuery_RR_TYPE::TYPE_AAAA: {
+                const DNS_RData_AAAA* aaaa = static_cast<const DNS_RData_AAAA*>(record.m_rdata);
+                Push64(dyn_buf, aaaa->address_upper());
+                Push64(dyn_buf, aaaa->address_lower());
+                break;
+            }
             case EDNSQuery_RR_TYPE::TYPE_CNAME:
                 StoreDomainNameWithAdvance(dyn_buf, static_cast<const DNS_RData_CNAME*>(record.m_rdata)->cname());
                 break;

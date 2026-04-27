@@ -7,6 +7,8 @@
 
 namespace netpp {
 
+std::string get_reverse_lookup_domain_name(const char* ip_addr);
+
 // RFC1035 - 3.2.2
 enum class EDNSQuery_RR_TYPE : uint16_t {
     TYPE_A = 1, // Host address
@@ -25,6 +27,13 @@ enum class EDNSQuery_RR_TYPE : uint16_t {
     TYPE_MINFO = 14, // Mailbox or List Information
     TYPE_MX = 15, // Mail Exchange
     TYPE_TXT = 16, // Text Strings
+    TYPE_AAAA = 28, // Host address (IPV6)
+
+    // [DNSSEC] - RFC4033, RFC4034, RFC4035
+    TYPE_DS = 43, // DNSKEY RR pointer stored in parental zone for child zone
+    TYPE_RRSIG = 46,  // Digital signature for DNSSEC verification
+    TYPE_NSEC = 47, // Next security info
+    TYPE_DNSKEY = 48, // Public key for DNS security
 };
 
 // RFC1035 - 3.2.3
@@ -45,6 +54,8 @@ enum class EDNSQuery_RR_QTYPE : uint16_t {
     TYPE_MINFO = 14, // Mailbox or List Information
     TYPE_MX = 15, // Mail Exchange
     TYPE_TXT = 16, // Text Strings
+    TYPE_AAAA = 28, // Host address (IPV6)
+    TYPE_DNSKEY = 48, // Public key for DNS security
 
     QTYPE_IXFR = 251, // Incremental Zone Transfer
     QTYPE_AXFR = 252, // Standard Zone Transfer
@@ -69,6 +80,23 @@ enum class EDNSQuery_RR_QCLASS : uint16_t {
     CLASS_HS = 4, // Hesiod [Dyer 87]
 
     QCLASS_ALL = 255, // Any Class
+};
+
+enum class EDNSQuery_OperationCode {
+    OPERATION_QUERY = 0,
+    OPERATION_REGISTRATION = 5,
+    OPERATION_RELEASE = 6,
+    OPERATION_WACK = 7,
+    OPERATION_REFRESH = 8,
+};
+
+enum class EDNSQuery_ReturnCode {
+    RETURN_SUCCESS = 0,
+    RETURN_FORMAT_ERROR = 1,
+    RETURN_SERVER_FAILURE = 2,
+    RETURN_NAME_ERROR = 3,
+    RETURN_NOT_IMPLEMENTED = 4,
+    RETURN_REFUSED = 5,
 };
 
 // Opaque base for inherited instances that represent each RDATA
@@ -129,7 +157,7 @@ public:
     static DNS_Message* create(const char* dns_buf, int buflen);
 
     static const char* build_buf(const DNS_Message& msg, uint32_t* size_out);
-    
+
     void set_id(uint16_t id) { m_id = id; }
     uint16_t id() const { return m_id; }
 
@@ -467,6 +495,8 @@ public:
     {
     }
 
+    std::string ipv4() const;
+
     uint32_t address() const noexcept
     {
         return m_address;
@@ -485,6 +515,8 @@ public:
         , m_bitmap(bitmap)
     {
     }
+
+    std::string ipv4() const;
 
     uint32_t address() const noexcept
     {
@@ -505,6 +537,72 @@ private:
     uint32_t m_address;
     uint8_t m_protocol;
     std::vector<uint8_t> m_bitmap;
+};
+
+class DNS_RData_AAAA final : public DNS_RData {
+public:
+    DNS_RData_AAAA() = delete;
+    DNS_RData_AAAA(uint64_t upper, uint64_t lower)
+        : m_upper(upper)
+        , m_lower(lower)
+    {
+    }
+
+    std::string ipv6() const;
+
+    uint64_t address_upper() const noexcept
+    {
+        return m_upper;
+    }
+
+    uint64_t address_lower() const noexcept
+    {
+        return m_lower;
+    }
+
+private:
+    uint64_t m_upper;
+    uint64_t m_lower;
+};
+
+class DNS_RData_DNSKEY final : public DNS_RData {
+public:
+    DNS_RData_DNSKEY() = delete;
+    DNS_RData_DNSKEY(uint16_t flags, uint8_t protocol, uint8_t algorithm, const std::vector<uint8_t>& pubkey)
+        : m_flags(flags)
+        , m_protocol(protocol)
+        , m_algorithm(algorithm)
+        , m_pubkey(pubkey)
+    {
+    }
+
+    std::string ipv6() const;
+
+    uint16_t flags() const noexcept
+    {
+        return m_flags;
+    }
+
+    uint8_t protocol() const noexcept
+    {
+        return m_protocol;
+    }
+
+    uint8_t algorithm() const noexcept
+    {
+        return m_algorithm;
+    }
+
+    const std::vector<uint8_t>& pubkey() const noexcept
+    {
+        return m_pubkey;
+    }
+
+private:
+    uint16_t m_flags;
+    uint8_t m_protocol;
+    uint8_t m_algorithm;
+    std::vector<uint8_t> m_pubkey;
 };
 
 }
