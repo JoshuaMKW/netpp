@@ -33,22 +33,22 @@ netpp::DNS_RData* RR_MX_Loader(const void* header, uint32_t rdlength, const void
 netpp::DNS_RData* RR_TXT_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 
 // --- Storers --- //
-uint16_t RR_A_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_NS_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MD_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MF_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_CNAME_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_SOA_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MB_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MG_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MR_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_NULL_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_WKS_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_PTR_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_HINFO_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MINFO_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_MX_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_TXT_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_A_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_NS_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MD_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MF_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_CNAME_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_SOA_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MB_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MG_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MR_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_NULL_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_WKS_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_PTR_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_HINFO_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MINFO_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_MX_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_TXT_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 
 static std::string DNSQuery_RDATA_GetCNAME(const DNSQuery_MessageHeader* h, const DNSQuery_RDATA* rdata)
 {
@@ -100,8 +100,8 @@ static std::string DNSQuery_RDATA_GetMINFO_RMAILBX(const DNSQuery_MessageHeader*
 static std::string DNSQuery_RDATA_GetMINFO_EMAILBX(const DNSQuery_MessageHeader* h, const DNSQuery_RDATA* rdata)
 {
     const uint8_t* minfo = (const uint8_t*)rdata;
-    uint16_t cpu_len = DNSQuery_GetDomainNameCompressedSize(minfo);
-    return DNSQuery_GetDomainName(h, minfo + cpu_len);
+    const uint16_t rmailbx_len = DNSQuery_GetDomainNameCompressedSize(minfo);
+    return DNSQuery_GetDomainName(h, minfo + rmailbx_len);
 }
 // -------
 
@@ -251,10 +251,10 @@ static std::vector<std::string> DNSQuery_RDATA_GetTXT_TXTDATA(const DNSQuery_RDA
 
     const uint8_t* strptr = (const uint8_t*)rdata;
     uint32_t marker = 0;
-    do {
+    while (marker < rdlength) {
         result.emplace_back(std::move(DNSQuery_GetCharacterString(strptr + marker)));
         marker += DNSQuery_GetCharacterStringLength(strptr + marker);
-    } while (marker < rdlength);
+    }
 
     return result;
 }
@@ -308,7 +308,7 @@ static bool DNSQuery_RDATA_GetWKS_BIT(const DNSQuery_RDATA* rdata, uint16_t rlen
     }
 
     uint8_t* wks_bits = (uint8_t*)rdata + 5;
-    return (bool)(wks_bits[bit >> 3] >> (7 - (bit % 8)));
+    return (bool)((wks_bits[bit >> 3] >> (7 - (bit % 8))) & 1);
 }
 
 static void DNSQuery_RDATA_SetWKS_BIT(DNSQuery_RDATA* rdata, uint16_t rlen, uint32_t bit, bool value)
@@ -333,190 +333,13 @@ static void DNSQuery_RDATA_SetWKS_BIT(DNSQuery_RDATA* rdata, uint16_t rlen, uint
     }
 }
 
-static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_UPPER(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned64(rdata);
-}
-
-static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_LOWER(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned64(_DNS_OffsetPtr<void>(rdata, 8));
-}
-
-static void DNSQuery_RDATA_SetAAAA_ADDRESS(DNSQuery_RDATA* rdata, uint64_t upper, uint64_t lower)
-{
-    _DNS_WriteUnaligned64(rdata, upper);
-    _DNS_WriteUnaligned64(_DNS_OffsetPtr<void>(rdata, 8), upper);
-}
-
-static uint16_t DNSQuery_RDATA_GetRRSIG_TYPECOVERED(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned16(rdata);
-}
-
-static void DNSQuery_RDATA_SetRRSIG_TYPECOVERED(DNSQuery_RDATA* rdata, uint16_t type_covered)
-{
-    _DNS_WriteUnaligned16(rdata, type_covered);
-}
-
-static uint8_t DNSQuery_RDATA_GetRRSIG_ALGORITHM(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
-}
-
-static void DNSQuery_RDATA_SetRRSIG_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = algorithm;
-}
-
-static uint8_t DNSQuery_RDATA_GetRRSIG_LABELS(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
-}
-
-static void DNSQuery_RDATA_SetRRSIG_LABELS(DNSQuery_RDATA* rdata, uint8_t labels)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = labels;
-}
-
-static uint32_t DNSQuery_RDATA_GetRRSIG_ORIGINALTTL(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 4));
-}
-
-static void DNSQuery_RDATA_SetRRSIG_ORIGINALTTL(DNSQuery_RDATA* rdata, uint32_t ttl)
-{
-    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 4), ttl);
-}
-
-static uint32_t DNSQuery_RDATA_GetRRSIG_SIGEXPIRIATION(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 8));
-}
-
-static void DNSQuery_RDATA_SetRRSIG_SIGEXPIRIATION(DNSQuery_RDATA* rdata, uint32_t expiration)
-{
-    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 8), expiration);
-}
-
-static uint32_t DNSQuery_RDATA_GetRRSIG_SIGINCEPTION(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(rdata, 12));
-}
-
-static void DNSQuery_RDATA_SetRRSIG_SIGINCEPTION(DNSQuery_RDATA* rdata, uint32_t inception)
-{
-    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(rdata, 12), inception);
-}
-
-static uint16_t DNSQuery_RDATA_GetRRSIG_KEYTAG(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(rdata, 16));
-}
-
-static void DNSQuery_RDATA_SetRRSIG_KEYTAG(DNSQuery_RDATA* rdata, uint16_t keytag)
-{
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(rdata, 16), keytag);
-}
-
-static std::string DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(const DNSQuery_RDATA* rdata)
-{
-    return DNSQuery_GetCharacterString(_DNS_OffsetPtr<uint8_t>(rdata, 18));
-}
-
-static std::vector<uint8_t> DNSQuery_RDATA_GetRRSIG_SIGNATURE(const DNSQuery_RDATA* rdata, uint16_t rdlength)
-{
-    const uint16_t signers_name_len = DNSQuery_GetCharacterStringLength((uint8_t*)rdata);
-    const uint8_t* signature_ptr = _DNS_OffsetPtr<uint8_t>(rdata, 18 + signers_name_len);
-
-    const uint16_t signature_len = rdlength - (18 + signers_name_len);
-    return std::vector(signature_ptr, signature_ptr + signature_len);
-}
-
-#define DNSKEY_FLAGS_HOLDS_ZONE_KEY(flags) ((bool)(((flags) >> 8) & 0b1))
-#define DNSKEY_FLAGS_IS_SECURE_ENTRY_POINT(flags) ((bool)((flags) & 0b1))
-
-static uint16_t DNSQuery_RDATA_GetDNSKEY_FLAGS(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned16(rdata);
-}
-
-static void DNSQuery_RDATA_SetDNSKEY_FLAGS(DNSQuery_RDATA* rdata, uint16_t flags)
-{
-    _DNS_WriteUnaligned16(rdata, flags);
-}
-
-static uint8_t DNSQuery_RDATA_GetDNSKEY_PROTOCOL(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
-}
-
-static void DNSQuery_RDATA_SetDNSKEY_PROTOCOL(DNSQuery_RDATA* rdata, uint8_t protocol)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = protocol;
-}
-
-static uint8_t DNSQuery_RDATA_GetDNSKEY_ALGORITHM(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
-}
-
-static void DNSQuery_RDATA_SetDNSKEY_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = algorithm;
-}
-
-static std::vector<uint8_t> DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(const DNSQuery_RDATA* rdata, uint16_t rdlength)
-{
-    const uint8_t* pubkey = _DNS_OffsetPtr<uint8_t>(rdata, 4);
-    return std::vector(pubkey, pubkey + rdlength - 4);
-}
-
-// RFC 1035 - 4.1.2 //
-// ---------------- //
-
-static uint16_t DNSQuery_Question_GetDataSize(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize((uint8_t*)q);
-    return qname_len + 4;
-}
-
-static std::string DNSQuery_Question_GetQNAME(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    return DNSQuery_GetDomainName(h, (const uint8_t*)q);
-}
-
-static netpp::EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize((uint8_t*)q);
-    return (netpp::EDNSQuery_RR_QTYPE)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(q, qname_len));
-}
-
-static void DNSQuery_Question_SetQTYPE(DNSQuery_QuestionSection* q, netpp::EDNSQuery_RR_QTYPE type)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len), (uint16_t)type);
-}
-
-static netpp::EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return (netpp::EDNSQuery_RR_QCLASS)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2));
-}
-
-static void DNSQuery_Question_SetQCLASS(DNSQuery_QuestionSection* q, netpp::EDNSQuery_RR_QCLASS klass)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2), (uint16_t)klass);
-}
-
 // ----------------
 
 netpp::DNS_RData* RR_A_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const uint32_t address = DNSQuery_RDATA_GetA_ADDRESS(rdata);
     return new netpp::DNS_RData_A(address);
@@ -524,6 +347,9 @@ netpp::DNS_RData* RR_A_Loader(const void* header_, uint32_t rdlength, const void
 
 netpp::DNS_RData* RR_CNAME_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string cname = DNSQuery_RDATA_GetCNAME(header, rdata);
@@ -532,6 +358,9 @@ netpp::DNS_RData* RR_CNAME_Loader(const void* header_, uint32_t rdlength, const 
 
 netpp::DNS_RData* RR_HINFO_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string cpu = DNSQuery_RDATA_GetHINFO_CPU(rdata);
     const std::string os = DNSQuery_RDATA_GetHINFO_OS(rdata);
@@ -540,6 +369,9 @@ netpp::DNS_RData* RR_HINFO_Loader(const void* header_, uint32_t rdlength, const 
 
 netpp::DNS_RData* RR_MB_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string madname = DNSQuery_RDATA_GetMB_MADNAME(header, rdata);
@@ -548,6 +380,9 @@ netpp::DNS_RData* RR_MB_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_MD_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string madname = DNSQuery_RDATA_GetMD_MADNAME(header, rdata);
@@ -556,6 +391,9 @@ netpp::DNS_RData* RR_MD_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_MF_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string madname = DNSQuery_RDATA_GetMF_MADNAME(header, rdata);
@@ -564,6 +402,9 @@ netpp::DNS_RData* RR_MF_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_MG_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string mgmname = DNSQuery_RDATA_GetMG_MGMNAME(header, rdata);
@@ -572,6 +413,9 @@ netpp::DNS_RData* RR_MG_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_MINFO_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string rmailbx = DNSQuery_RDATA_GetMINFO_RMAILBX(header, rdata);
@@ -581,6 +425,9 @@ netpp::DNS_RData* RR_MINFO_Loader(const void* header_, uint32_t rdlength, const 
 
 netpp::DNS_RData* RR_MR_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string newname = DNSQuery_RDATA_GetMR_NEWNAME(header, rdata);
@@ -589,6 +436,9 @@ netpp::DNS_RData* RR_MR_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_MX_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const uint16_t preference = DNSQuery_RDATA_GetMX_PREFERENCE(rdata);
@@ -598,6 +448,9 @@ netpp::DNS_RData* RR_MX_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_NULL_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const uint8_t* anything = DNSQuery_RDATA_GetNULL_Format<uint8_t>(rdata, rdlength);
     return new netpp::DNS_RData_NULL(std::vector<uint8_t>(anything, anything + rdlength));
@@ -605,6 +458,9 @@ netpp::DNS_RData* RR_NULL_Loader(const void* header_, uint32_t rdlength, const v
 
 netpp::DNS_RData* RR_NS_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string nsdname = DNSQuery_RDATA_GetNS_NSDNAME(header, rdata);
@@ -613,6 +469,9 @@ netpp::DNS_RData* RR_NS_Loader(const void* header_, uint32_t rdlength, const voi
 
 netpp::DNS_RData* RR_PTR_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string nsdname = DNSQuery_RDATA_GetPTR_PTRDNAME(header, rdata);
@@ -621,6 +480,9 @@ netpp::DNS_RData* RR_PTR_Loader(const void* header_, uint32_t rdlength, const vo
 
 netpp::DNS_RData* RR_SOA_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::string mname = DNSQuery_RDATA_GetSOA_MNAME(header, rdata);
@@ -635,6 +497,9 @@ netpp::DNS_RData* RR_SOA_Loader(const void* header_, uint32_t rdlength, const vo
 
 netpp::DNS_RData* RR_TXT_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const std::vector<std::string> txtdata = DNSQuery_RDATA_GetTXT_TXTDATA(rdata, rdlength);
     return new netpp::DNS_RData_TXT(txtdata);
@@ -642,11 +507,141 @@ netpp::DNS_RData* RR_TXT_Loader(const void* header_, uint32_t rdlength, const vo
 
 netpp::DNS_RData* RR_WKS_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
+    if (rdlength == 0) {
+        return nullptr;
+    }
     const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
     const uint32_t address = DNSQuery_RDATA_GetWKS_ADDRESS(rdata);
     const uint8_t protocol = DNSQuery_RDATA_GetWKS_PROTOCOL(rdata);
     const std::vector<uint8_t> bitmap = DNSQuery_RDATA_GetWKS_BITMAP(rdata, rdlength);
     return new netpp::DNS_RData_WKS(address, protocol, bitmap);
+}
+
+uint16_t RR_A_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    DNSQuery_Push32(state.m_out, static_cast<const netpp::DNS_RData_A*>(rdata)->address());
+    return 4;
+}
+
+uint16_t RR_NS_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_NS* ns = static_cast<const netpp::DNS_RData_NS*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, ns->nsdname());
+}
+
+uint16_t RR_MD_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MD* md = static_cast<const netpp::DNS_RData_MD*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, md->madname());
+}
+
+uint16_t RR_MF_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MF* mf = static_cast<const netpp::DNS_RData_MF*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, mf->madname());
+}
+
+uint16_t RR_CNAME_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    return DNSQuery_StoreDomainNameWithAdvance(state, static_cast<const netpp::DNS_RData_CNAME*>(rdata)->cname());
+}
+
+uint16_t RR_SOA_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_SOA* soa = static_cast<const netpp::DNS_RData_SOA*>(rdata);
+    const uint16_t mname_len = DNSQuery_StoreDomainNameWithAdvance(state, soa->mname());
+    const uint16_t rname_len = DNSQuery_StoreDomainNameWithAdvance(state, soa->rname());
+    DNSQuery_Push32(state.m_out, soa->serial());
+    DNSQuery_Push32(state.m_out, soa->refresh());
+    DNSQuery_Push32(state.m_out, soa->retry());
+    DNSQuery_Push32(state.m_out, soa->expire());
+    DNSQuery_Push32(state.m_out, soa->minimum());
+    return 20 + mname_len + rname_len;
+}
+
+uint16_t RR_MB_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MB* mb = static_cast<const netpp::DNS_RData_MB*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, mb->madname());
+}
+
+uint16_t RR_MG_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MG* mg = static_cast<const netpp::DNS_RData_MG*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, mg->mgmname());
+}
+
+uint16_t RR_MR_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MR* mr = static_cast<const netpp::DNS_RData_MR*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, mr->newname());
+}
+
+uint16_t RR_NULL_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_NULL* null_rd = static_cast<const netpp::DNS_RData_NULL*>(rdata);
+    state.m_out.insert(state.m_out.end(), null_rd->data().begin(), null_rd->data().end());
+    return null_rd->data().size();
+}
+
+uint16_t RR_WKS_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_WKS* wks = static_cast<const netpp::DNS_RData_WKS*>(rdata);
+    DNSQuery_Push32(state.m_out, wks->address()); // IPv4 Address
+    state.m_out.push_back(wks->protocol()); // 8-bit Protocol
+    state.m_out.insert(state.m_out.end(), wks->bitmap().begin(), wks->bitmap().end()); // Variable Bit Map
+    return 5 + wks->bitmap().size();
+}
+
+uint16_t RR_PTR_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_PTR* ptr = static_cast<const netpp::DNS_RData_PTR*>(rdata);
+    return DNSQuery_StoreDomainNameWithAdvance(state, ptr->ptrdname());
+}
+
+uint16_t RR_HINFO_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_HINFO* hinfo = static_cast<const netpp::DNS_RData_HINFO*>(rdata);
+
+    const uint8_t cpu_len = static_cast<uint8_t>(std::min(hinfo->cpu().length(), (size_t)255));
+    state.m_out.push_back(cpu_len);
+    state.m_out.insert(state.m_out.end(), hinfo->cpu().begin(), hinfo->cpu().begin() + cpu_len);
+
+    const uint8_t os_len = static_cast<uint8_t>(std::min(hinfo->os().length(), (size_t)255));
+    state.m_out.push_back(os_len);
+    state.m_out.insert(state.m_out.end(), hinfo->os().begin(), hinfo->os().begin() + os_len);
+
+    return 2 + cpu_len + os_len;
+}
+
+uint16_t RR_MINFO_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    auto* minfo = static_cast<const netpp::DNS_RData_MINFO*>(rdata);
+    const uint16_t rmail_len = DNSQuery_StoreDomainNameWithAdvance(state, minfo->rmailbx());
+    const uint16_t email_len = DNSQuery_StoreDomainNameWithAdvance(state, minfo->emailbx());
+    return rmail_len + email_len;
+}
+
+uint16_t RR_MX_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    const netpp::DNS_RData_MX* mx = static_cast<const netpp::DNS_RData_MX*>(rdata);
+    DNSQuery_Push16(state.m_out, mx->preference());
+    return 2 + DNSQuery_StoreDomainNameWithAdvance(state, mx->exchange());
+}
+
+uint16_t RR_TXT_Storer(netpp::DNS_StorerState &state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS)
+{
+    uint16_t total_len = 0;
+
+    const netpp::DNS_RData_TXT* txt = static_cast<const netpp::DNS_RData_TXT*>(rdata);
+    for (const std::string& str : txt->txtdata()) {
+        const uint8_t len = static_cast<uint8_t>(std::min(str.length(), (size_t)255));
+        state.m_out.push_back(len);
+        state.m_out.insert(state.m_out.end(), str.begin(), str.begin() + len);
+        total_len += (1 + len);
+    }
+
+    return total_len;
 }
 
 namespace netpp {
@@ -659,76 +654,6 @@ std::string DNS_RData_A::ipv4() const
 std::string DNS_RData_WKS::ipv4() const
 {
     return std::to_string((m_address >> 24) & 0xFF) + "." + std::to_string((m_address >> 16) & 0xFF) + "." + std::to_string((m_address >> 8) & 0xFF) + "." + std::to_string(m_address & 0xFF);
-}
-
-std::string DNS_RData_AAAA::ipv6() const
-{
-    const uint16_t blocks[8] = {
-        static_cast<uint16_t>(m_upper >> 48),
-        static_cast<uint16_t>(m_upper >> 32),
-        static_cast<uint16_t>(m_upper >> 16),
-        static_cast<uint16_t>(m_upper),
-        static_cast<uint16_t>(m_lower >> 48),
-        static_cast<uint16_t>(m_lower >> 32),
-        static_cast<uint16_t>(m_lower >> 16),
-        static_cast<uint16_t>(m_lower)
-    };
-
-    // Find the longest consecutive run of zero blocks
-    int max_zero_start = -1;
-    int max_zero_len = 0;
-    int current_zero_start = -1;
-    int current_zero_len = 0;
-
-    for (int i = 0; i < 8; ++i) {
-        if (blocks[i] == 0) {
-            if (current_zero_start == -1) {
-                current_zero_start = i;
-            }
-            current_zero_len++;
-        } else {
-            if (current_zero_len > max_zero_len) {
-                max_zero_len = current_zero_len;
-                max_zero_start = current_zero_start;
-            }
-            current_zero_start = -1;
-            current_zero_len = 0;
-        }
-    }
-    // Catch if the zero run goes all the way to the end of the array
-    if (current_zero_len > max_zero_len) {
-        max_zero_len = current_zero_len;
-        max_zero_start = current_zero_start;
-    }
-
-    // RFC 5952 Rule: "::" must not be used to shorten a single 16-bit 0 block
-    if (max_zero_len <= 1) {
-        max_zero_start = -1;
-    }
-
-    std::string result;
-    result.reserve(IPV6_MAX_SIZE);
-    char buf[5]; // Max size of a 16-bit hex string is 4 chars + null terminator
-
-    for (int i = 0; i < 8; ++i) {
-        if (i == max_zero_start) {
-            result += "::";
-            i += max_zero_len - 1; // Advance the iterator to the end of the zero run
-            continue;
-        }
-
-        // Add a colon separator, EXCEPT:
-        // - At the very beginning (i == 0)
-        // - Immediately after a "::" was placed
-        if (i != 0 && i != (max_zero_start + max_zero_len)) {
-            result += ":";
-        }
-
-        snprintf(buf, sizeof(buf), "%x", blocks[i]);
-        result += buf;
-    }
-
-    return result;
 }
 
 }

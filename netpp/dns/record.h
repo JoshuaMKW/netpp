@@ -106,8 +106,14 @@ enum class EDNSQuery_ReturnCode {
 
 // Opaque base for inherited instances that represent each RDATA
 class DNS_RData { };
+
+struct DNS_StorerState {
+    std::vector<uint8_t> m_out;
+    uint32_t m_header_idx;
+    std::unordered_map<std::string, uint16_t> m_dname_to_pointer_cache;
+};
 using DNS_RR_Loader = DNS_RData* (*)(const void* header, uint32_t rdlength, const void* rdata, EDNSQuery_RR_CLASS);
-using DNS_RR_Storer = uint16_t (*)(std::vector<uint8_t> &, const void* header, DNS_RData*, EDNSQuery_RR_CLASS);
+using DNS_RR_Storer = uint16_t (*)(DNS_StorerState &, DNS_RData*, EDNSQuery_RR_CLASS);
 
 class DNS_Question {
 public:

@@ -226,4 +226,74 @@ struct DNSQuery_ResourceRecordSection { };
 // RFC 1035
 struct DNSQuery_RDATA { };
 
+// Helper to write raw 16 bit integers to the back of the vector
+inline void DNSQuery_Push16(std::vector<uint8_t>& out, uint16_t val)
+{
+    size_t offset = out.size();
+    out.resize(out.size() + 2);
+    _DNS_WriteUnaligned16(out.data() + offset, val);
+}
+
+// Helper to write raw 32 bit integers to the back of the vector
+inline void DNSQuery_Push32(std::vector<uint8_t>& out, uint32_t val)
+{
+    size_t offset = out.size();
+    out.resize(out.size() + 4);
+    _DNS_WriteUnaligned32(out.data() + offset, val);
+}
+
+// Helper to write raw 64 bit integers to the back of the vector
+inline void DNSQuery_Push64(std::vector<uint8_t>& out, uint64_t val)
+{
+    size_t offset = out.size();
+    out.resize(out.size() + 8);
+    _DNS_WriteUnaligned64(out.data() + offset, val);
+}
+
+    // Returns the index that comes directly after this domain name in the buffer
+inline uint16_t DNSQuery_StoreDomainNameWithAdvance(netpp::DNS_StorerState& state, const std::string& dname)
+{
+    const uint32_t start_len = static_cast<uint32_t>(state.m_out.size());
+    
+    if (dname.empty() || dname == ".") {
+        state.m_out.push_back(0);
+        return 1;
+    }
+
+    // In this case we store it as a compressed ptr
+    if (state.m_dname_to_pointer_cache.find(dname) != state.m_dname_to_pointer_cache.end()) {
+        const uint16_t pointer = state.m_dname_to_pointer_cache.at(dname);
+
+        // DNS compression pointer: top 2 bits must be 11 (0xC000)
+        const uint16_t compressed_ptr = 0xC000 | pointer;
+
+        DNSQuery_Push16(state.m_out, compressed_ptr);
+        return 2;
+    }
+
+    // Store as an uncompressed domain name and cache to the dname pointer map
+    state.m_dname_to_pointer_cache[dname] = static_cast<uint16_t>(state.m_out.size() - state.m_header_idx);
+
+    // Parse the dname (Example: "www.google.com" -> \x03www\x06google\x03com\x00)
+    size_t start = 0;
+    while (start < dname.length()) {
+        size_t end = dname.find('.', start);
+        if (end == std::string::npos) {
+            end = dname.length();
+        }
+
+        size_t len = end - start;
+        if (len > 0) {
+            state.m_out.push_back(static_cast<uint8_t>(len));
+            for (size_t i = 0; i < len; ++i) {
+                state.m_out.push_back(dname[start + i]);
+            }
+        }
+        start = end + 1;
+    }
+
+    state.m_out.push_back(0); // NULL terminator
+    return static_cast<uint16_t>(state.m_out.size() - start_len);
+};
+
 // -----------------

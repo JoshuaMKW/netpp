@@ -18,7 +18,7 @@
 netpp::DNS_RData* RR_AAAA_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 
 // --- Storers --- //
-uint16_t RR_AAAA_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_AAAA_Storer(std::vector<uint8_t>&, uint32_t header_idx, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 
 static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_UPPER(const DNSQuery_RDATA* rdata)
 {
@@ -33,7 +33,7 @@ static uint64_t DNSQuery_RDATA_GetAAAA_ADDRESS_LOWER(const DNSQuery_RDATA* rdata
 static void DNSQuery_RDATA_SetAAAA_ADDRESS(DNSQuery_RDATA* rdata, uint64_t upper, uint64_t lower)
 {
     _DNS_WriteUnaligned64(rdata, upper);
-    _DNS_WriteUnaligned64(_DNS_OffsetPtr<void>(rdata, 8), upper);
+    _DNS_WriteUnaligned64(_DNS_OffsetPtr<void>(rdata, 8), lower);
 }
 
 // ----------------
@@ -44,6 +44,14 @@ netpp::DNS_RData* RR_AAAA_Loader(const void* header_, uint32_t rdlength, const v
     const uint64_t upper = DNSQuery_RDATA_GetAAAA_ADDRESS_UPPER(rdata);
     const uint64_t lower = DNSQuery_RDATA_GetAAAA_ADDRESS_LOWER(rdata);
     return new netpp::DNS_RData_AAAA(upper, lower);
+}
+
+uint16_t RR_AAAA_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+{
+    const netpp::DNS_RData_AAAA* aaaa = static_cast<const netpp::DNS_RData_AAAA*>(rdata);
+    DNSQuery_Push64(state.m_out, aaaa->address_upper());
+    DNSQuery_Push64(state.m_out, aaaa->address_lower());
+    return 16;
 }
 
 namespace netpp {

@@ -52,27 +52,27 @@ extern netpp::DNS_RData* RR_DS_Loader(const void* header, uint32_t rdlength, con
 extern netpp::DNS_RData* RR_NSEC_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 
 // --- Storers --- //
-extern uint16_t RR_A_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_NS_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MD_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MF_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_CNAME_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_SOA_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MB_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MG_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MR_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_NULL_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_WKS_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_PTR_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_HINFO_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MINFO_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_MX_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_TXT_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_AAAA_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_DNSKEY_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_RRSIG_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_DS_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-extern uint16_t RR_NSEC_Storer(std::vector<uint8_t>&, const void* header, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_A_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_NS_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MD_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MF_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_CNAME_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_SOA_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MB_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MG_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MR_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_NULL_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_WKS_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_PTR_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_HINFO_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MINFO_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_MX_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_TXT_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_AAAA_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_DNSKEY_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_RRSIG_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_DS_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+extern uint16_t RR_NSEC_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 
 static const auto s_rr_loaders = []() -> std::vector<netpp::DNS_RR_Loader> {
     std::vector<netpp::DNS_RR_Loader> out((size_t)netpp::EDNSQuery_RR_TYPE::TYPE_MAX, nullptr);
@@ -346,7 +346,7 @@ namespace netpp {
 
 static bool IsAddressIPV4(const char* ip_addr)
 {
-    const int str_len = strnlen(ip_addr, IPV6_MAX_SIZE);
+    const uint32_t str_len = static_cast<uint32_t>(strnlen(ip_addr, IPV6_MAX_SIZE));
     if (str_len > IPV4_MAX_SIZE) {
         return false;
     }
@@ -367,13 +367,13 @@ static bool IsAddressIPV4(const char* ip_addr)
             }
         }
 
-        int digits = std::distance(seg_ptr, seg_end);
+        const uint32_t digits = static_cast<uint32_t>(std::distance(seg_ptr, seg_end));
         if (digits == 0 || digits > 3) {
             return false; // Each octet is only up to 3 characters
         }
 
         int octet = 0;
-        for (int i = 0; i < digits; ++i) {
+        for (uint32_t i = 0; i < digits; ++i) {
             if (!isdigit(seg_ptr[i])) {
                 return false; // Each octet is decimal only
             }
@@ -398,7 +398,7 @@ static bool IsAddressIPV6(const char* ip_addr)
     }
 
     // A standard IPv6 string cannot exceed 39 characters
-    const int str_len = strnlen(ip_addr, IPV6_MAX_SIZE + 1);
+    const uint32_t str_len = static_cast<uint32_t>(strnlen(ip_addr, IPV6_MAX_SIZE + 1));
     if (str_len < 2 || str_len > IPV6_MAX_SIZE) {
         return false;
     }
@@ -407,7 +407,7 @@ static bool IsAddressIPV6(const char* ip_addr)
     int current_hex_digits = 0;
     bool has_double_colon = false;
 
-    for (int i = 0; i < str_len; ++i) {
+    for (uint32_t i = 0; i < str_len; ++i) {
         char c = ip_addr[i];
 
         if (isxdigit(c)) {
@@ -458,7 +458,7 @@ static bool IsAddressIPV6(const char* ip_addr)
 
 static std::string ReverseLookupIPV4(const char* ip_addr)
 {
-    const int str_len = strnlen(ip_addr, IPV4_MAX_SIZE);
+    const uint32_t str_len = static_cast<uint32_t>(strnlen(ip_addr, IPV4_MAX_SIZE));
 
     std::string lookup_name(str_len, '\0');
     int lookup_name_idx = (int)lookup_name.size();
@@ -473,7 +473,7 @@ static std::string ReverseLookupIPV4(const char* ip_addr)
             seg_end = ip_addr + str_len;
         }
 
-        int digits = std::distance(seg_ptr, seg_end);
+        const uint32_t digits = static_cast<uint32_t>(std::distance(seg_ptr, seg_end));
         lookup_name_idx -= digits;
 
         strncpy(lookup_name.data() + lookup_name_idx, seg_ptr, digits);
@@ -591,86 +591,6 @@ get_reverse_lookup_domain_name(const char* ip_addr)
     }
 
     return std::string();
-}
-
-std::string DNS_RData_A::ipv4() const
-{
-    return std::to_string((m_address >> 24) & 0xFF) + "." + std::to_string((m_address >> 16) & 0xFF) + "." + std::to_string((m_address >> 8) & 0xFF) + "." + std::to_string(m_address & 0xFF);
-}
-
-std::string DNS_RData_WKS::ipv4() const
-{
-    return std::to_string((m_address >> 24) & 0xFF) + "." + std::to_string((m_address >> 16) & 0xFF) + "." + std::to_string((m_address >> 8) & 0xFF) + "." + std::to_string(m_address & 0xFF);
-}
-
-std::string DNS_RData_AAAA::ipv6() const
-{
-    const uint16_t blocks[8] = {
-        static_cast<uint16_t>(m_upper >> 48),
-        static_cast<uint16_t>(m_upper >> 32),
-        static_cast<uint16_t>(m_upper >> 16),
-        static_cast<uint16_t>(m_upper),
-        static_cast<uint16_t>(m_lower >> 48),
-        static_cast<uint16_t>(m_lower >> 32),
-        static_cast<uint16_t>(m_lower >> 16),
-        static_cast<uint16_t>(m_lower)
-    };
-
-    // Find the longest consecutive run of zero blocks
-    int max_zero_start = -1;
-    int max_zero_len = 0;
-    int current_zero_start = -1;
-    int current_zero_len = 0;
-
-    for (int i = 0; i < 8; ++i) {
-        if (blocks[i] == 0) {
-            if (current_zero_start == -1) {
-                current_zero_start = i;
-            }
-            current_zero_len++;
-        } else {
-            if (current_zero_len > max_zero_len) {
-                max_zero_len = current_zero_len;
-                max_zero_start = current_zero_start;
-            }
-            current_zero_start = -1;
-            current_zero_len = 0;
-        }
-    }
-    // Catch if the zero run goes all the way to the end of the array
-    if (current_zero_len > max_zero_len) {
-        max_zero_len = current_zero_len;
-        max_zero_start = current_zero_start;
-    }
-
-    // RFC 5952 Rule: "::" must not be used to shorten a single 16-bit 0 block
-    if (max_zero_len <= 1) {
-        max_zero_start = -1;
-    }
-
-    std::string result;
-    result.reserve(IPV6_MAX_SIZE);
-    char buf[5]; // Max size of a 16-bit hex string is 4 chars + null terminator
-
-    for (int i = 0; i < 8; ++i) {
-        if (i == max_zero_start) {
-            result += "::";
-            i += max_zero_len - 1; // Advance the iterator to the end of the zero run
-            continue;
-        }
-
-        // Add a colon separator, EXCEPT:
-        // - At the very beginning (i == 0)
-        // - Immediately after a "::" was placed
-        if (i != 0 && i != (max_zero_start + max_zero_len)) {
-            result += ":";
-        }
-
-        snprintf(buf, sizeof(buf), "%x", blocks[i]);
-        result += buf;
-    }
-
-    return result;
 }
 
 DNS_Question::DNS_Question(const std::string& name, EDNSQuery_RR_QTYPE type, EDNSQuery_RR_QCLASS klass)
@@ -878,13 +798,15 @@ const char* DNS_Message::build_buf(const DNS_Message& msg, uint32_t* size_out)
         return nullptr;
     }
 
-    std::vector<uint8_t> dyn_buf;
-    dyn_buf.reserve(512); // Pre-allocate standard UDP limit to avoid reallocation
-    dyn_buf.resize(DNSQuery_MessageHeader_GetDataSize(nullptr), 0);
+    DNS_StorerState state;
+    state.m_out.reserve(2048);
+    state.m_out.resize(DNSQuery_MessageHeader_GetDataSize(nullptr), 0);
+    state.m_header_idx = 0;
+    state.m_dname_to_pointer_cache = {};
 
     // Set up the header
     // Safe to use data() here because we do all header writes before pushing new data
-    DNSQuery_MessageHeader* header = reinterpret_cast<DNSQuery_MessageHeader*>(dyn_buf.data());
+    DNSQuery_MessageHeader* header = reinterpret_cast<DNSQuery_MessageHeader*>(state.m_out.data());
     {
         DNSQuery_MessageHeader_SetID(header, msg.m_id);
         DNSQuery_MessageHeader_SetFlags(header, msg.m_flags);
@@ -894,204 +816,32 @@ const char* DNS_Message::build_buf(const DNS_Message& msg, uint32_t* size_out)
         DNSQuery_MessageHeader_SetARCount(header, static_cast<uint16_t>(msg.m_additionals.size()));
     }
 
-    std::unordered_map<std::string, uint16_t> dname_to_pointer_map;
-
-    // Returns the index that comes directly after this domain name in the buffer
-    auto StoreDomainNameWithAdvance = [&dname_to_pointer_map](std::vector<uint8_t>& out, const std::string& dname) -> ptrdiff_t {
-        if (dname.empty() || dname == ".") {
-            out.push_back(0);
-            return out.size();
-        }
-
-        // In this case we store it as a compressed ptr
-        if (dname_to_pointer_map.find(dname) != dname_to_pointer_map.end()) {
-            const uint16_t pointer = dname_to_pointer_map.at(dname);
-
-            // DNS compression pointer: top 2 bits must be 11 (0xC000)
-            uint16_t compressed_ptr = 0xC000 | pointer;
-
-            size_t offset = out.size();
-            out.resize(out.size() + 2);
-            _DNS_WriteUnaligned16(out.data() + offset, compressed_ptr);
-
-            return out.size();
-        }
-
-        // Store as an uncompressed domain name and cache to the dname pointer map
-        dname_to_pointer_map[dname] = static_cast<uint16_t>(out.size());
-
-        // Parse the dname (Example: "www.google.com" -> \x03www\x06google\x03com\x00)
-        size_t start = 0;
-        while (start < dname.length()) {
-            size_t end = dname.find('.', start);
-            if (end == std::string::npos) {
-                end = dname.length();
-            }
-
-            size_t len = end - start;
-            if (len > 0) {
-                out.push_back(static_cast<uint8_t>(len));
-                for (size_t i = 0; i < len; ++i) {
-                    out.push_back(dname[start + i]);
-                }
-            }
-            start = end + 1;
-        }
-        out.push_back(0); // NULL terminator
-        return out.size();
-    };
-
-    // Helper to write raw 16/32 bit integers to the back of the vector
-    auto Push16 = [](std::vector<uint8_t>& out, uint16_t val) {
-        size_t offset = out.size();
-        out.resize(out.size() + 2);
-        _DNS_WriteUnaligned16(out.data() + offset, val);
-    };
-    auto Push32 = [](std::vector<uint8_t>& out, uint32_t val) {
-        size_t offset = out.size();
-        out.resize(out.size() + 4);
-        _DNS_WriteUnaligned32(out.data() + offset, val);
-    };
-    auto Push64 = [](std::vector<uint8_t>& out, uint64_t val) {
-        size_t offset = out.size();
-        out.resize(out.size() + 8);
-        _DNS_WriteUnaligned64(out.data() + offset, val);
-    };
-
     for (const DNS_Question& question : msg.m_questions) {
-        StoreDomainNameWithAdvance(dyn_buf, question.m_name);
-        Push16(dyn_buf, static_cast<uint16_t>(question.m_type));
-        Push16(dyn_buf, static_cast<uint16_t>(question.m_class));
+        DNSQuery_StoreDomainNameWithAdvance(state, question.m_name);
+        DNSQuery_Push16(state.m_out, static_cast<uint16_t>(question.m_type));
+        DNSQuery_Push16(state.m_out, static_cast<uint16_t>(question.m_class));
     }
 
     // Generalized Record Serializer Lambda
     auto SerializeRecord = [&](const DNS_Record& record) {
-        StoreDomainNameWithAdvance(dyn_buf, record.m_name);
-        Push16(dyn_buf, static_cast<uint16_t>(record.m_type));
-        Push16(dyn_buf, static_cast<uint16_t>(record.m_class));
-        Push32(dyn_buf, record.m_ttl);
+        DNSQuery_StoreDomainNameWithAdvance(state, record.m_name);
+        DNSQuery_Push16(state.m_out, static_cast<uint16_t>(record.m_type));
+        DNSQuery_Push16(state.m_out, static_cast<uint16_t>(record.m_class));
+        DNSQuery_Push32(state.m_out, record.m_ttl);
 
         // Save the index for RDLENGTH, push 2 dummy bytes
-        size_t rdlength_index = dyn_buf.size();
-        dyn_buf.push_back(0);
-        dyn_buf.push_back(0);
-
-        size_t rdata_start = dyn_buf.size();
+        const size_t rdlength_index = state.m_out.size();
+        DNSQuery_Push16(state.m_out, 0);
 
         // Serialize the specific RDATA
-        if (record.m_rdata) {
-            switch (record.m_type) {
-            case EDNSQuery_RR_TYPE::TYPE_A:
-                Push32(dyn_buf, static_cast<const DNS_RData_A*>(record.m_rdata)->address());
-                break;
-            case EDNSQuery_RR_TYPE::TYPE_AAAA: {
-                const DNS_RData_AAAA* aaaa = static_cast<const DNS_RData_AAAA*>(record.m_rdata);
-                Push64(dyn_buf, aaaa->address_upper());
-                Push64(dyn_buf, aaaa->address_lower());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_CNAME:
-                StoreDomainNameWithAdvance(dyn_buf, static_cast<const DNS_RData_CNAME*>(record.m_rdata)->cname());
-                break;
-            case EDNSQuery_RR_TYPE::TYPE_HINFO: {
-                auto* hinfo = static_cast<const DNS_RData_HINFO*>(record.m_rdata);
-
-                uint8_t cpu_len = static_cast<uint8_t>(std::min(hinfo->cpu().length(), (size_t)255));
-                dyn_buf.push_back(cpu_len);
-                dyn_buf.insert(dyn_buf.end(), hinfo->cpu().begin(), hinfo->cpu().begin() + cpu_len);
-
-                uint8_t os_len = static_cast<uint8_t>(std::min(hinfo->os().length(), (size_t)255));
-                dyn_buf.push_back(os_len);
-                dyn_buf.insert(dyn_buf.end(), hinfo->os().begin(), hinfo->os().begin() + os_len);
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MB: {
-                auto* mb = static_cast<const DNS_RData_MB*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, mb->madname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MD: {
-                auto* md = static_cast<const DNS_RData_MD*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, md->madname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MF: {
-                auto* mf = static_cast<const DNS_RData_MF*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, mf->madname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MG: {
-                auto* mg = static_cast<const DNS_RData_MG*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, mg->mgmname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MINFO: {
-                auto* minfo = static_cast<const DNS_RData_MINFO*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, minfo->rmailbx());
-                StoreDomainNameWithAdvance(dyn_buf, minfo->emailbx());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MR: {
-                auto* mr = static_cast<const DNS_RData_MR*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, mr->newname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_MX: {
-                auto* mx = static_cast<const DNS_RData_MX*>(record.m_rdata);
-                Push16(dyn_buf, mx->preference());
-                StoreDomainNameWithAdvance(dyn_buf, mx->exchange());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_NULL: {
-                auto* null_rd = static_cast<const DNS_RData_NULL*>(record.m_rdata);
-                dyn_buf.insert(dyn_buf.end(), null_rd->data().begin(), null_rd->data().end());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_NS: {
-                auto* ns = static_cast<const DNS_RData_NS*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, ns->nsdname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_PTR: {
-                auto* ptr = static_cast<const DNS_RData_PTR*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, ptr->ptrdname());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_SOA: {
-                auto* soa = static_cast<const DNS_RData_SOA*>(record.m_rdata);
-                StoreDomainNameWithAdvance(dyn_buf, soa->mname());
-                StoreDomainNameWithAdvance(dyn_buf, soa->rname());
-                Push32(dyn_buf, soa->serial());
-                Push32(dyn_buf, soa->refresh());
-                Push32(dyn_buf, soa->retry());
-                Push32(dyn_buf, soa->expire());
-                Push32(dyn_buf, soa->minimum());
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_TXT: {
-                const DNS_RData_TXT* txt = static_cast<const DNS_RData_TXT*>(record.m_rdata);
-                for (const std::string& str : txt->txtdata()) {
-                    const uint8_t len = static_cast<uint8_t>(std::min(str.length(), (size_t)255));
-                    dyn_buf.push_back(len);
-                    dyn_buf.insert(dyn_buf.end(), str.begin(), str.begin() + len);
-                }
-                break;
-            }
-            case EDNSQuery_RR_TYPE::TYPE_WKS: {
-                const DNS_RData_WKS* wks = static_cast<const DNS_RData_WKS*>(record.m_rdata);
-                Push32(dyn_buf, wks->address()); // IPv4 Address
-                dyn_buf.push_back(wks->protocol()); // 8-bit Protocol
-                dyn_buf.insert(dyn_buf.end(), wks->bitmap().begin(), wks->bitmap().end()); // Variable Bit Map
-                break;
-            }
-            default:
-                break;
-            }
+        if (!record.m_rdata) {
+            return;
         }
 
-        size_t rdata_end = dyn_buf.size();
-        uint16_t rdlength = static_cast<uint16_t>(rdata_end - rdata_start);
-        _DNS_WriteUnaligned16(dyn_buf.data() + rdlength_index, rdlength);
+        const DNS_RR_Storer rr_storer = s_rr_storers.at(static_cast<size_t>(record.m_type));
+        const uint16_t rdlength = rr_storer ? rr_storer(state, record.m_rdata, record.m_class) : 0;
+
+        _DNS_WriteUnaligned16(state.m_out.data() + rdlength_index, rdlength);
     };
 
     for (const DNS_Record& answer : msg.m_answers) {
@@ -1107,9 +857,9 @@ const char* DNS_Message::build_buf(const DNS_Message& msg, uint32_t* size_out)
     }
 
     // Finalize output
-    *size_out = static_cast<uint32_t>(dyn_buf.size());
+    *size_out = static_cast<uint32_t>(state.m_out.size());
     char* final_buf = new char[*size_out];
-    std::memcpy(final_buf, dyn_buf.data(), *size_out);
+    std::memcpy(final_buf, state.m_out.data(), *size_out);
 
     return final_buf;
 }
