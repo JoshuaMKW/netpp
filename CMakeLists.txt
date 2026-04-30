@@ -6,7 +6,7 @@ project(netpp_project VERSION 1.0 LANGUAGES CXX)
 find_package(OpenSSL REQUIRED)
 
 # Set the C++ standard
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(NETPP_SKIP_TLS_CERT_VERIFY False CACHE BOOL "Setting this to true makes it so the TLS layer skips certificate verification for the server and clients.")

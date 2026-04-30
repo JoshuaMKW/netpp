@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,8 @@ enum class EDNSQuery_RR_TYPE : uint16_t {
     TYPE_RRSIG = 46,  // Digital signature for DNSSEC verification
     TYPE_NSEC = 47, // Next security info
     TYPE_DNSKEY = 48, // Public key for DNS security
+
+    TYPE_MAX = std::numeric_limits<uint16_t>::max(),
 };
 
 // RFC1035 - 3.2.3
@@ -62,6 +65,8 @@ enum class EDNSQuery_RR_QTYPE : uint16_t {
     QTYPE_MAILB = 253, // Request for Mailbox records (MB, MG, or MR)
     QTYPE_MAILA = 254, // Request for Mail Agent Records (Obsolete - see MX)
     QTYPE_ALL = 255, // All Records
+
+    QTYPE_MAX = std::numeric_limits<uint16_t>::max(),
 };
 
 // RFC1035 - 3.2.4
@@ -101,6 +106,8 @@ enum class EDNSQuery_ReturnCode {
 
 // Opaque base for inherited instances that represent each RDATA
 class DNS_RData { };
+using DNS_RR_Loader = DNS_RData* (*)(const void* header, uint32_t rdlength, const void* rdata, EDNSQuery_RR_CLASS);
+using DNS_RR_Storer = uint16_t (*)(std::vector<uint8_t> &, const void* header, DNS_RData*, EDNSQuery_RR_CLASS);
 
 class DNS_Question {
 public:

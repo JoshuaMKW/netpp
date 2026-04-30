@@ -57,8 +57,9 @@ add_library(netpp STATIC
     
     dns/record.h
     dns/record.cpp
-    http/router.cpp
-)
+    dns/rr_impl/common.h
+    dns/rr_impl/rfc1035.cpp
+ "dns/rr_impl/rfc4034.cpp" "dns/rr_impl/rfc3596.cpp")
 
 # Include directories
 target_include_directories(netpp PUBLIC 
