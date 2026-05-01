@@ -32,7 +32,7 @@ enum class EDNSQuery_RR_TYPE : uint16_t {
 
     // [DNSSEC] - RFC4033, RFC4034, RFC4035
     TYPE_DS = 43, // DNSKEY RR pointer stored in parental zone for child zone
-    TYPE_RRSIG = 46,  // Digital signature for DNSSEC verification
+    TYPE_RRSIG = 46, // Digital signature for DNSSEC verification
     TYPE_NSEC = 47, // Next security info
     TYPE_DNSKEY = 48, // Public key for DNS security
 
@@ -113,7 +113,7 @@ struct DNS_StorerState {
     std::unordered_map<std::string, uint16_t> m_dname_to_pointer_cache;
 };
 using DNS_RR_Loader = DNS_RData* (*)(const void* header, uint32_t rdlength, const void* rdata, EDNSQuery_RR_CLASS);
-using DNS_RR_Storer = uint16_t (*)(DNS_StorerState &, DNS_RData*, EDNSQuery_RR_CLASS);
+using DNS_RR_Storer = uint16_t (*)(DNS_StorerState&, DNS_RData*, EDNSQuery_RR_CLASS);
 
 class DNS_Question {
 public:
@@ -616,6 +616,79 @@ private:
     uint8_t m_protocol;
     uint8_t m_algorithm;
     std::vector<uint8_t> m_pubkey;
+};
+
+class DNS_RData_RRSIG final : public DNS_RData {
+public:
+    DNS_RData_RRSIG() = delete;
+    DNS_RData_RRSIG(netpp::EDNSQuery_RR_TYPE type_covered, uint8_t algorithm, uint8_t labels, uint32_t original_ttl, uint32_t sig_expiration, uint32_t sig_inception, uint16_t key_tag, const std::string& signers_name, const std::vector<uint8_t>& signature)
+        : m_type_covered(type_covered)
+        , m_algorithm(algorithm)
+        , m_labels(labels)
+        , m_original_ttl(original_ttl)
+        , m_sig_expiration(sig_expiration)
+        , m_sig_inception(sig_inception)
+        , m_key_tag(key_tag)
+        , m_signers_name(signers_name)
+        , m_signature(signature)
+    {
+    }
+
+    netpp::EDNSQuery_RR_TYPE type_covered() const
+    {
+        return m_type_covered;
+    }
+
+    uint8_t algorithm() const noexcept
+    {
+        return m_algorithm;
+    }
+
+    uint8_t labels() const noexcept
+    {
+        return m_labels;
+    }
+
+    uint32_t original_ttl() const noexcept
+    {
+        return m_original_ttl;
+    }
+
+    uint32_t sig_expiration() const noexcept
+    {
+        return m_sig_expiration;
+    }
+
+    uint32_t sig_inception() const noexcept
+    {
+        return m_sig_inception;
+    }
+
+    uint16_t key_tag() const noexcept
+    {
+        return m_key_tag;
+    }
+
+    const std::string& signers_name() const noexcept
+    {
+        return m_signers_name;
+    }
+
+    const std::vector<uint8_t>& signature() const noexcept
+    {
+        return m_signature;
+    }
+
+private:
+    netpp::EDNSQuery_RR_TYPE m_type_covered;
+    uint8_t m_algorithm;
+    uint8_t m_labels;
+    uint32_t m_original_ttl;
+    uint32_t m_sig_expiration;
+    uint32_t m_sig_inception;
+    uint16_t m_key_tag;
+    std::string m_signers_name;
+    std::vector<uint8_t> m_signature;
 };
 
 }

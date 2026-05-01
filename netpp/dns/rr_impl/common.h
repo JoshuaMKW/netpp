@@ -251,7 +251,7 @@ inline void DNSQuery_Push64(std::vector<uint8_t>& out, uint64_t val)
 }
 
     // Returns the index that comes directly after this domain name in the buffer
-inline uint16_t DNSQuery_StoreDomainNameWithAdvance(netpp::DNS_StorerState& state, const std::string& dname)
+inline uint16_t DNSQuery_StoreDomainNameWithAdvance(netpp::DNS_StorerState& state, const std::string& dname, bool use_compression = true)
 {
     const uint32_t start_len = static_cast<uint32_t>(state.m_out.size());
     
@@ -260,19 +260,21 @@ inline uint16_t DNSQuery_StoreDomainNameWithAdvance(netpp::DNS_StorerState& stat
         return 1;
     }
 
-    // In this case we store it as a compressed ptr
-    if (state.m_dname_to_pointer_cache.find(dname) != state.m_dname_to_pointer_cache.end()) {
-        const uint16_t pointer = state.m_dname_to_pointer_cache.at(dname);
+    if (use_compression) {
+        // In this case we store it as a compressed ptr
+        if (state.m_dname_to_pointer_cache.find(dname) != state.m_dname_to_pointer_cache.end()) {
+            const uint16_t pointer = state.m_dname_to_pointer_cache.at(dname);
 
-        // DNS compression pointer: top 2 bits must be 11 (0xC000)
-        const uint16_t compressed_ptr = 0xC000 | pointer;
+            // DNS compression pointer: top 2 bits must be 11 (0xC000)
+            const uint16_t compressed_ptr = 0xC000 | pointer;
 
-        DNSQuery_Push16(state.m_out, compressed_ptr);
-        return 2;
+            DNSQuery_Push16(state.m_out, compressed_ptr);
+            return 2;
+        }
+
+        // Store as an uncompressed domain name and cache to the dname pointer map
+        state.m_dname_to_pointer_cache[dname] = static_cast<uint16_t>(state.m_out.size() - state.m_header_idx);
     }
-
-    // Store as an uncompressed domain name and cache to the dname pointer map
-    state.m_dname_to_pointer_cache[dname] = static_cast<uint16_t>(state.m_out.size() - state.m_header_idx);
 
     // Parse the dname (Example: "www.google.com" -> \x03www\x06google\x03com\x00)
     size_t start = 0;

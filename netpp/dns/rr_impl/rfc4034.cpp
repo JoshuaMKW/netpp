@@ -21,10 +21,49 @@ netpp::DNS_RData* RR_DS_Loader(const void* header, uint32_t rdlength, const void
 netpp::DNS_RData* RR_NSEC_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 
 // --- Storers --- //
-uint16_t RR_DNSKEY_Storer(std::vector<uint8_t>&, uint32_t header_idx, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_RRSIG_Storer(std::vector<uint8_t>&, uint32_t header_idx, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_DS_Storer(std::vector<uint8_t>&, uint32_t header_idx, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
-uint16_t RR_NSEC_Storer(std::vector<uint8_t>&, uint32_t header_idx, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_DNSKEY_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_RRSIG_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_DS_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+uint16_t RR_NSEC_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+
+#define DNSKEY_FLAGS_HOLDS_ZONE_KEY(flags) ((bool)(((flags) >> 8) & 0b1))
+#define DNSKEY_FLAGS_IS_SECURE_ENTRY_POINT(flags) ((bool)((flags) & 0b1))
+
+static uint16_t DNSQuery_RDATA_GetDNSKEY_FLAGS(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned16(rdata);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_FLAGS(DNSQuery_RDATA* rdata, uint16_t flags)
+{
+    _DNS_WriteUnaligned16(rdata, flags);
+}
+
+static uint8_t DNSQuery_RDATA_GetDNSKEY_PROTOCOL(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_PROTOCOL(DNSQuery_RDATA* rdata, uint8_t protocol)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = protocol;
+}
+
+static uint8_t DNSQuery_RDATA_GetDNSKEY_ALGORITHM(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
+}
+
+static void DNSQuery_RDATA_SetDNSKEY_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = algorithm;
+}
+
+static std::vector<uint8_t> DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(const DNSQuery_RDATA* rdata, uint16_t rdlength)
+{
+    const uint8_t* pubkey = _DNS_OffsetPtr<uint8_t>(rdata, 4);
+    return std::vector(pubkey, pubkey + rdlength - 4);
+}
 
 static netpp::EDNSQuery_RR_TYPE DNSQuery_RDATA_GetRRSIG_TYPECOVERED(const DNSQuery_RDATA* rdata)
 {
@@ -96,9 +135,9 @@ static void DNSQuery_RDATA_SetRRSIG_KEYTAG(DNSQuery_RDATA* rdata, uint16_t keyta
     _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(rdata, 16), keytag);
 }
 
-static std::string DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(const DNSQuery_RDATA* rdata)
+static std::string DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(const DNSQuery_MessageHeader* header, const DNSQuery_RDATA* rdata)
 {
-    return DNSQuery_GetCharacterString(_DNS_OffsetPtr<uint8_t>(rdata, 18));
+    return DNSQuery_GetDomainName(header, _DNS_OffsetPtr<uint8_t>(rdata, 18));
 }
 
 static std::vector<uint8_t> DNSQuery_RDATA_GetRRSIG_SIGNATURE(const DNSQuery_RDATA* rdata, uint16_t rdlength)
@@ -110,163 +149,15 @@ static std::vector<uint8_t> DNSQuery_RDATA_GetRRSIG_SIGNATURE(const DNSQuery_RDA
     return std::vector(signature_ptr, signature_ptr + signature_len);
 }
 
-#define DNSKEY_FLAGS_HOLDS_ZONE_KEY(flags) ((bool)(((flags) >> 8) & 0b1))
-#define DNSKEY_FLAGS_IS_SECURE_ENTRY_POINT(flags) ((bool)((flags) & 0b1))
-
-static uint16_t DNSQuery_RDATA_GetDNSKEY_FLAGS(const DNSQuery_RDATA* rdata)
-{
-    return _DNS_ReadUnaligned16(rdata);
+static std::string DNSQuery_RDATA_GetNSEC_NEXTDOMAINNAME(const DNSQuery_MessageHeader* header, const DNSQuery_RDATA* rdata) {
+    return DNSQuery_GetDomainName(header, _DNS_OffsetPtr<uint8_t>(rdata, 0));
 }
 
-static void DNSQuery_RDATA_SetDNSKEY_FLAGS(DNSQuery_RDATA* rdata, uint16_t flags)
+static std::vector<uint8_t> DNSQuery_RDATA_GetNSEC_TYPEBITMAPS(const DNSQuery_MessageHeader* header, const DNSQuery_RDATA* rdata, uint16_t rdlength)
 {
-    _DNS_WriteUnaligned16(rdata, flags);
-}
-
-static uint8_t DNSQuery_RDATA_GetDNSKEY_PROTOCOL(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
-}
-
-static void DNSQuery_RDATA_SetDNSKEY_PROTOCOL(DNSQuery_RDATA* rdata, uint8_t protocol)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = protocol;
-}
-
-static uint8_t DNSQuery_RDATA_GetDNSKEY_ALGORITHM(const DNSQuery_RDATA* rdata)
-{
-    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
-}
-
-static void DNSQuery_RDATA_SetDNSKEY_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
-{
-    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = algorithm;
-}
-
-static std::vector<uint8_t> DNSQuery_RDATA_GetDNSKEY_PUBLICKEY(const DNSQuery_RDATA* rdata, uint16_t rdlength)
-{
-    const uint8_t* pubkey = _DNS_OffsetPtr<uint8_t>(rdata, 4);
-    return std::vector(pubkey, pubkey + rdlength - 4);
-}
-
-// RFC 1035 - 4.1.2 //
-// ---------------- //
-
-static uint16_t DNSQuery_Question_GetDataSize(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize((uint8_t*)q);
-    return qname_len + 4;
-}
-
-static std::string DNSQuery_Question_GetQNAME(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    return DNSQuery_GetDomainName(h, (const uint8_t*)q);
-}
-
-static netpp::EDNSQuery_RR_QTYPE DNSQuery_Question_GetQTYPE(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize((uint8_t*)q);
-    return (netpp::EDNSQuery_RR_QTYPE)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(q, qname_len));
-}
-
-static void DNSQuery_Question_SetQTYPE(DNSQuery_QuestionSection* q, netpp::EDNSQuery_RR_QTYPE type)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len), (uint16_t)type);
-}
-
-static netpp::EDNSQuery_RR_QCLASS DNSQuery_Question_GetQCLASS(const DNSQuery_MessageHeader* h, const DNSQuery_QuestionSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return (netpp::EDNSQuery_RR_QCLASS)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2));
-}
-
-static void DNSQuery_Question_SetQCLASS(DNSQuery_QuestionSection* q, netpp::EDNSQuery_RR_QCLASS klass)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2), (uint16_t)klass);
-}
-
-// ------------------
-
-// RFC 1035 - 4.1.3 //
-// ---------------- //
-
-static std::string DNSQuery_ResourceRecord_GetQNAME(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    return DNSQuery_GetDomainName(h, (const uint8_t*)q);
-}
-
-static netpp::EDNSQuery_RR_TYPE DNSQuery_ResourceRecord_GetTYPE(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return (netpp::EDNSQuery_RR_TYPE)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len));
-}
-
-static void DNSQuery_ResourceRecord_SetTYPE(DNSQuery_ResourceRecordSection* q, netpp::EDNSQuery_RR_TYPE type)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len), (uint16_t)type);
-}
-
-static netpp::EDNSQuery_RR_CLASS DNSQuery_ResourceRecord_GetCLASS(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return (netpp::EDNSQuery_RR_CLASS)_DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2));
-}
-
-static void DNSQuery_ResourceRecord_SetCLASS(DNSQuery_ResourceRecordSection* q, netpp::EDNSQuery_RR_CLASS klass)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 2), (uint16_t)klass);
-}
-
-static uint32_t DNSQuery_ResourceRecord_GetTTL(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return _DNS_ReadUnaligned32(_DNS_OffsetPtr<void>(qinfo, qname_len + 4));
-}
-
-static void DNSQuery_ResourceRecord_SetTTL(DNSQuery_ResourceRecordSection* q, uint32_t ttl)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned32(_DNS_OffsetPtr<void>(qinfo, qname_len + 4), ttl);
-}
-
-static uint16_t DNSQuery_ResourceRecord_GetRDLENGTH(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return _DNS_ReadUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 8));
-}
-
-static void DNSQuery_ResourceRecord_SetRDLENGTH(DNSQuery_ResourceRecordSection* q, uint16_t rdlength)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    _DNS_WriteUnaligned16(_DNS_OffsetPtr<void>(qinfo, qname_len + 8), rdlength);
-}
-
-static DNSQuery_RDATA* DNSQuery_ResourceRecord_GetRDATA(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint8_t* qinfo = (uint8_t*)q;
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize(qinfo);
-    return (DNSQuery_RDATA*)(_DNS_OffsetPtr<void>(qinfo, qname_len + 10));
-}
-
-static uint16_t DNSQuery_ResourceRecord_GetDataSize(const DNSQuery_MessageHeader* h, const DNSQuery_ResourceRecordSection* q)
-{
-    uint16_t qname_len = DNSQuery_GetDomainNameCompressedSize((uint8_t*)q);
-    return qname_len + 10 + DNSQuery_ResourceRecord_GetRDLENGTH(h, q);
+    const uint16_t nextdomain_len = DNSQuery_GetDomainNameCompressedSize(_DNS_OffsetPtr<uint8_t>(rdata, 0));
+    const uint8_t* bitmaps_start = _DNS_OffsetPtr<uint8_t>(rdata, nextdomain_len);
+    return std::vector<uint8_t>(bitmaps_start, bitmaps_start + (rdlength - nextdomain_len));
 }
 
 // ----------------
@@ -295,11 +186,10 @@ netpp::DNS_RData* RR_RRSIG_Loader(const void* header_, uint32_t rdlength, const 
     const uint16_t key_tag = DNSQuery_RDATA_GetRRSIG_KEYTAG(rdata);
 
     uint16_t name_len = 0;
-    const std::string signers_name = DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(rdata);
+    const std::string signers_name = DNSQuery_RDATA_GetRRSIG_SIGNERSNAME(header, rdata);
     const std::vector<uint8_t> signature = DNSQuery_RDATA_GetRRSIG_SIGNATURE(rdata, rdlength);
 
-    return nullptr;
-    //return new netpp::DNS_RData_RRSIG(type_covered, algorithm, labels, original_ttl, sig_expiration, sig_inception, key_tag, signers_name, signature);
+    return new netpp::DNS_RData_RRSIG(type_covered, algorithm, labels, original_ttl, sig_expiration, sig_inception, key_tag, signers_name, signature);
 }
 
 // Stubs for DS and NSEC to complete the set
@@ -311,6 +201,26 @@ netpp::DNS_RData* RR_DS_Loader(const void* header_, uint32_t rdlength, const voi
 netpp::DNS_RData* RR_NSEC_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
     return nullptr;
+}
+
+uint16_t RR_DNSKEY_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+{
+    return 0;
+}
+
+uint16_t RR_RRSIG_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+{
+    return 0;
+}
+
+uint16_t RR_DS_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+{
+    return 0;
+}
+
+uint16_t RR_NSEC_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+{
+    return 0;
 }
 
 namespace netpp {
