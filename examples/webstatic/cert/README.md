@@ -1,0 +1,1 @@
+Place your certificate files (localhost.key, localhost.crt, rootCA.crt) in this directory
