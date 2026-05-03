@@ -160,6 +160,42 @@ static std::vector<uint8_t> DNSQuery_RDATA_GetNSEC_TYPEBITMAPS(const DNSQuery_Me
     return std::vector<uint8_t>(bitmaps_start, bitmaps_start + (rdlength - nextdomain_len));
 }
 
+static uint16_t DNSQuery_RDATA_GetDS_KEYTAG(const DNSQuery_RDATA* rdata)
+{
+    return _DNS_ReadUnaligned16(rdata);
+}
+
+static void DNSQuery_RDATA_SetDS_KEYTAG(DNSQuery_RDATA* rdata, uint16_t key_tag)
+{
+    _DNS_WriteUnaligned16(rdata, key_tag);
+}
+
+static uint8_t DNSQuery_RDATA_GetDS_ALGORITHM(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 2);
+}
+
+static void DNSQuery_RDATA_SetDS_ALGORITHM(DNSQuery_RDATA* rdata, uint8_t algorithm)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 2) = algorithm;
+}
+
+static uint8_t DNSQuery_RDATA_GetDS_DIGESTTYPE(const DNSQuery_RDATA* rdata)
+{
+    return *_DNS_OffsetPtr<uint8_t>(rdata, 3);
+}
+
+static void DNSQuery_RDATA_SetDS_DIGESTTYPE(DNSQuery_RDATA* rdata, uint8_t digest_type)
+{
+    *_DNS_OffsetPtr<uint8_t>(rdata, 3) = digest_type;
+}
+
+static std::vector<uint8_t> DNSQuery_RDATA_GetDS_DIGEST(const DNSQuery_MessageHeader* header, const DNSQuery_RDATA* rdata, uint16_t rdlength)
+{
+    const uint8_t* digest_start = _DNS_OffsetPtr<uint8_t>(rdata, 4);
+    return std::vector<uint8_t>(digest_start, digest_start + (rdlength - 4));
+}
+
 // ----------------
 
 netpp::DNS_RData* RR_DNSKEY_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
@@ -192,13 +228,12 @@ netpp::DNS_RData* RR_RRSIG_Loader(const void* header_, uint32_t rdlength, const 
     return new netpp::DNS_RData_RRSIG(type_covered, algorithm, labels, original_ttl, sig_expiration, sig_inception, key_tag, signers_name, signature);
 }
 
-// Stubs for DS and NSEC to complete the set
-netpp::DNS_RData* RR_DS_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
+netpp::DNS_RData* RR_NSEC_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
     return nullptr;
 }
 
-netpp::DNS_RData* RR_NSEC_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
+netpp::DNS_RData* RR_DS_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
     return nullptr;
 }
@@ -213,12 +248,12 @@ uint16_t RR_RRSIG_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata,
     return 0;
 }
 
-uint16_t RR_DS_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+uint16_t RR_NSEC_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
 {
     return 0;
 }
 
-uint16_t RR_NSEC_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
+uint16_t RR_DS_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)
 {
     return 0;
 }

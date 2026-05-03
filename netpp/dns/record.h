@@ -691,4 +691,66 @@ private:
     std::vector<uint8_t> m_signature;
 };
 
+class DNS_RData_NSEC final : public DNS_RData {
+public:
+    DNS_RData_NSEC() = delete;
+    DNS_RData_NSEC(const std::string& next_domain_name, const std::vector<uint8_t>& type_bitmap)
+        : m_next_domain_name(next_domain_name)
+        , m_type_bitmap(type_bitmap)
+    {
+    }
+
+    const std::string& next_domain_name() const noexcept
+    {
+        return m_next_domain_name;
+    }
+
+    const std::vector<uint8_t>& type_bitmap() const noexcept
+    {
+        return m_type_bitmap;
+    }
+
+private:
+    std::string m_next_domain_name;
+    std::vector<uint8_t> m_type_bitmap;
+};
+
+class DNS_RData_DS final : public DNS_RData {
+public:
+    DNS_RData_DS() = delete;
+    DNS_RData_DS(uint16_t key_tag, uint8_t algorithm, uint8_t digest_type, const std::vector<uint8_t>& digest)
+        : m_key_tag(key_tag)
+        , m_algorithm(algorithm)
+        , m_digest_type(digest_type)
+        , m_digest(digest)
+    {
+    }
+
+    const uint16_t key_tag() const noexcept
+    {
+        return m_key_tag;
+    }
+
+    const uint8_t algorithm() const noexcept
+    {
+        return m_algorithm;
+    }
+
+    const uint8_t digest_type() const noexcept
+    {
+        return m_digest_type;
+    }
+
+    const std::vector<uint8_t>& digest() const noexcept
+    {
+        return m_digest;
+    }
+
+private:
+    uint16_t m_key_tag;
+    uint8_t m_algorithm;
+    uint8_t m_digest_type;
+    std::vector<uint8_t> m_digest;
+};
+
 }
