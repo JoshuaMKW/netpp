@@ -81,7 +81,7 @@ static bool generate_client_key_rsa(
 
   // Set the subject details (Who is requesting this cert?)
   // C=Country, O=Organization, CN=Common Name (Unique ID or Hostname)
-  X509_NAME* name = X509_REQ_get_subject_name(req);
+  X509_NAME* name = X509_NAME_new();
   X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)country.c_str(), -1, -1, 0);
   X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)organization.c_str(), -1, -1, 0);
 

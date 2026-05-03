@@ -371,19 +371,22 @@ IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketProcData& data, c
     const SocketIOInfo& sock_data = pipe->get_io_info();
     const char* recv_buf = pipe->get_os_layer()->recv_buf();
 
-    // Update how many unprocessed bytes have been transferred...
+    // Prepare the copied recv buffer by reallocing and
+    // concatenating the new data. This is eventually processed
+    // all at once, either on the first pass for unencrypted
+    // data, or potentially after many recv streams when encrypted.
     // ---
+    char* proc_recv_buf = (char*)realloc(data.m_recv_buf, data.m_recv_buf_size + info.m_bytes_transferred);
+    if (!proc_recv_buf) {
+        pipe->error(ESocketErrorReason::E_REASON_RESOURCES);
+        return nullptr;
+    }
 
-    // data.m_recv_state.m_bytes_transferred += info.m_bytes_transferred;
+    data.m_recv_buf = proc_recv_buf;
+    memmove_s(data.m_recv_buf + data.m_recv_buf_size, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
+    data.m_recv_buf_size += info.m_bytes_transferred;
 
     // Here we process enough to determine the underlying protocol
-    // ---
-    // The goal is this--m_proc_buf points to the potentially decrypted
-    // or otherwise post processed data taken from recv_buf.
-    //
-    // By keeping track of two buffers and the amount of bytes
-    // processed, we are able to stitch together fragmented
-    // data packets incoming from the socket...
     // ---
     const char* proc_out;
     uint32_t proc_size, recv_digested;
@@ -403,18 +406,6 @@ IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketProcData& data, c
         memmove_s(data.m_recv_buf, data.m_recv_buf_size, data.m_recv_buf + recv_digested, data.m_recv_buf_size);
     }
 
-    // Prepare the copied recv buffer by reallocing and
-    // concatenating the new data. This is eventually processed
-    // all at once, either on the first pass for unencrypted
-    // data, or potentially after many recv streams when encrypted.
-    // ---
-    char* proc_recv_buf = (char*)realloc(data.m_recv_buf, data.m_recv_buf_size + info.m_bytes_transferred);
-    if (proc_recv_buf) {
-        data.m_recv_buf = proc_recv_buf;
-    }
-    memmove_s(data.m_recv_buf + data.m_recv_buf_size, info.m_bytes_transferred, recv_buf, info.m_bytes_transferred);
-    data.m_recv_buf_size += info.m_bytes_transferred;
-
     // Under this circumstance, the pipe is waiting
     // for more data to be received to complete the
     // processing. This is important for TLS Records
@@ -432,81 +423,55 @@ IApplicationLayerAdapter* TCP_Server::handle_inproc_recv(SocketProcData& data, c
     // hasn't been determined yet, so allocate a temporary
     // smaller one to process the adapter with...
     // ---
-    // We create a copy of the proc buffer pointer because
-    // later we do some pointer swapping based on the
-    // predicted size of the processed data...
-    // ---
-    char* proc_buf = nullptr;
-    if (data.m_bytes_total == 0) {
-        proc_buf = (char*)malloc(data.m_recv_buf_size);
-        data.m_bytes_processed = 0;
-    } else {
-        // At this point the total expected size of whatever
-        // processed application layer protocol has been
-        // determined and preallocated. So we just use
-        // that calculation.
-        // ---
-        proc_buf = data.m_proc_buf;
+    const uint32_t cur_processed = data.m_bytes_processed + proc_size;
+    uint32_t target_size = (data.m_bytes_total > cur_processed) ? data.m_bytes_total : cur_processed;
+
+    char* new_proc_buf = (char*)realloc(data.m_proc_buf, target_size);
+    if (!new_proc_buf) {
+        pipe->error(ESocketErrorReason::E_REASON_RESOURCES);
+        return nullptr;
     }
+    data.m_proc_buf = new_proc_buf;
 
     // Update the processed marker so the next pass is correctly offset...
     // ---
-    const uint32_t cur_processed = data.m_bytes_processed + proc_size;
-    memcpy_s(proc_buf + data.m_bytes_processed, proc_size, proc_out, proc_size);
+    memcpy_s(data.m_proc_buf + data.m_bytes_processed, target_size - data.m_bytes_processed, proc_out, proc_size);
 
     // Then we attempt to identify what kind of data is coming in from
     // the socket... this is done after decryption so we can identify
     // the application layer protocol regardless of security used...
     // ---
-    adapter = ApplicationAdapterFactory::detect(proc_buf, cur_processed, ETransportLayerProtocol::E_TCP, m_security);
+    adapter = ApplicationAdapterFactory::detect(data.m_proc_buf, cur_processed, ETransportLayerProtocol::E_TCP, m_security);
 
     // Finally we calculate the expected capacity of the protocol data
     // ---
-    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
-        data.m_bytes_total = adapter->calc_size(proc_buf, cur_processed);
-        data.m_proc_until_closed = data.m_bytes_total == 0;
+    if (adapter && !data.m_proc_until_closed && data.m_bytes_total == 0) {
+        data.m_bytes_total = adapter->calc_size(data.m_proc_buf, cur_processed);
+        data.m_proc_until_closed = (data.m_bytes_total == 0);
     }
 
     // If the adapter is not valid, we need to reset the state
     // and return an error...
     // ---
-    if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
-        pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
-        data.m_bytes_total = 0;
-        data.m_bytes_processed = 0;
-        free(data.m_proc_buf);
-        data.m_proc_buf = nullptr;
-        return nullptr;
+    if (!adapter) {
+        if (!data.m_proc_until_closed && data.m_bytes_total == 0) {
+            pipe->error(ESocketErrorReason::E_REASON_ADAPTER_UNKNOWN);
+            data.m_bytes_total = 0;
+            data.m_bytes_processed = 0;
+            free(data.m_proc_buf);
+            data.m_proc_buf = nullptr;
+            return nullptr;
+        }
     }
 
     // Under the condition that the transferred data estimate doesn't
     // the total expected data, we go ahead and resize the
     // buffer to be the total bytes for the upcoming reads...
     // ---
-    if (data.m_proc_until_closed) {
-        char* new_proc_buf = (char*)realloc(data.m_proc_buf, cur_processed);
-        if (new_proc_buf) {
-            if (!data.m_proc_buf) {
-                memcpy_s(
-                    new_proc_buf,
-                    data.m_bytes_processed,
-                    proc_buf,
-                    data.m_bytes_processed);
-            }
-            data.m_proc_buf = new_proc_buf;
-        }
-    } else if (!data.m_proc_buf) {
-        if (data.m_bytes_total > data.m_recv_buf_size) {
-            char* new_proc_buf = (char*)malloc(data.m_bytes_total);
-            memcpy_s(
-                new_proc_buf,
-                data.m_bytes_processed,
-                proc_buf,
-                data.m_bytes_processed);
-            free(proc_buf);
-            data.m_proc_buf = new_proc_buf;
-        } else {
-            data.m_proc_buf = proc_buf;
+    if (adapter && data.m_bytes_total > cur_processed) {
+        char* prealloc = (char*)realloc(data.m_proc_buf, data.m_bytes_total);
+        if (prealloc) {
+            data.m_proc_buf = prealloc;
         }
     }
 

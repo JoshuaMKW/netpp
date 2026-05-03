@@ -30,7 +30,7 @@ using namespace std::chrono_literals;
 #if SERVER_USE_TLS
 #define SERVER_CERT "./cert/localhost.crt"
 #define SERVER_KEY "./cert/localhost.key"
-#define SERVER_CACERT "./cert/rootCA.pem"
+#define SERVER_CACERT "./cert/rootCA.crt"
 #define SERVER_CERT_PASSWD ""
 
 #define SERVER_PORT "443"
@@ -114,15 +114,16 @@ int main(int argc, char** argv) {
     });
 
 #if SERVER_USE_TLS
+  // One-way TLS for HTTPS website
   TLSSecurityFactory* security
     = new TLSSecurityFactory(true, SERVER_KEY, SERVER_CERT, SERVER_CACERT, "localhost", SERVER_CERT_PASSWD,
-      ETLSVerifyFlags::VERIFY_PEER | ETLSVerifyFlags::VERIFY_FAIL_IF_NO_PEER_CERT);
+          ETLSVerifyFlags::VERIFY_NONE);
 #else
   TLSSecurityFactory* security = nullptr;
 #endif
 
   // Create a server instance with TLS security and 1024 sockets
-  TCP_Server server(nullptr, 1024);
+  TCP_Server server(security, 1024);
 
   server.on_http_request([&http_router](const ISocketPipe* source, const HTTP_Request* request) {
     return http_router.signal_method(request);
