@@ -372,3 +372,4 @@ FodyWeavers.xsd
 *.ext
 *.p12
 *.srl
+*.key
