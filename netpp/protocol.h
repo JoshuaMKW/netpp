@@ -54,6 +54,17 @@ public:
     virtual bool wants_more_data(const char* data, uint32_t size) const = 0;
 };
 
+class NETPP_API UNKNOWN_ApplicationAdapter final : public IApplicationLayerAdapter {
+public:
+    UNKNOWN_ApplicationAdapter() = default;
+    ~UNKNOWN_ApplicationAdapter() override = default;
+
+    bool on_receive(ISocketPipe* pipe, const char* data, uint32_t size, uint32_t flags) override;
+    uint32_t calc_size(const char* data, uint32_t size) const override;
+    uint32_t calc_proc_size(const char* data, uint32_t size) const override;
+    bool wants_more_data(const char* data, uint32_t size) const override;
+};
+
 class NETPP_API DNS_ApplicationAdapter final : public IApplicationLayerAdapter {
 public:
     DNS_ApplicationAdapter(bool is_tcp)
