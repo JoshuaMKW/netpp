@@ -230,12 +230,22 @@ netpp::DNS_RData* RR_RRSIG_Loader(const void* header_, uint32_t rdlength, const 
 
 netpp::DNS_RData* RR_NSEC_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
-    return nullptr;
+    const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
+    const DNSQuery_RDATA* rdata = static_cast<const DNSQuery_RDATA*>(rdata_);
+    const std::string next_domain_name = DNSQuery_RDATA_GetNSEC_NEXTDOMAINNAME(header, rdata);
+    const std::vector<uint8_t> type_bitmaps = DNSQuery_RDATA_GetNSEC_TYPEBITMAPS(header, rdata, rdlength);
+    return new netpp::DNS_RData_NSEC(next_domain_name, type_bitmaps);
 }
 
 netpp::DNS_RData* RR_DS_Loader(const void* header_, uint32_t rdlength, const void* rdata_, netpp::EDNSQuery_RR_CLASS klass)
 {
-    return nullptr;
+    const DNSQuery_MessageHeader* header = static_cast<const DNSQuery_MessageHeader*>(header_);
+    const DNSQuery_RDATA* rdata = (const DNSQuery_RDATA*)rdata_;
+    const uint16_t key_tag = DNSQuery_RDATA_GetDS_KEYTAG(rdata);
+    const uint8_t algorithm = DNSQuery_RDATA_GetDS_ALGORITHM(rdata);
+    const uint8_t digest_type = DNSQuery_RDATA_GetDS_DIGESTTYPE(rdata);
+    const std::vector<uint8_t> digest = DNSQuery_RDATA_GetDS_DIGEST(header, rdata, rdlength);
+    return new netpp::DNS_RData_DS(key_tag, algorithm, digest_type, digest);
 }
 
 uint16_t RR_DNSKEY_Storer(netpp::DNS_StorerState& state, netpp::DNS_RData* rdata, netpp::EDNSQuery_RR_CLASS klass)

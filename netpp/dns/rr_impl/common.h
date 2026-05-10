@@ -33,12 +33,13 @@ inline auto _DNS_OffsetPtr(U* ptr, uint32_t ofs) -> std::conditional_t<std::is_c
 {
     // If U is const, byte_ptr will be const uint8_t*. Otherwise, uint8_t*.
     using byte_t = std::conditional_t<std::is_const_v<U>, const uint8_t, uint8_t>;
+    using ret_t = std::conditional_t<std::is_const_v<U>, const T*, T*>;
 
     if (!ptr)
         return nullptr;
 
     byte_t* byte_ptr = reinterpret_cast<byte_t*>(ptr);
-    return byte_ptr + ofs;
+    return reinterpret_cast<ret_t>(byte_ptr + ofs);
 }
 
 inline uint16_t _DNS_ReadUnaligned16(const void* ptr)
@@ -114,7 +115,8 @@ inline std::string DNSQuery_GetDomainName(const DNSQuery_MessageHeader* h, const
 
     while (result.length() < DNS_NAME_OCTET_LIMIT) {
         const bool is_compressed = (enc_data[0] & 0b11000000) == 0b11000000;
-        uint8_t token_length = (enc_data[0] & 0b00111111);
+        const bool is_extended = (enc_data[0] & 0b01000000) == 0b01000000;
+        uint8_t token_value = (enc_data[0] & 0b00111111);
 
         if (is_compressed) {
             if (pointers_chased >= 10) {
@@ -122,16 +124,22 @@ inline std::string DNSQuery_GetDomainName(const DNSQuery_MessageHeader* h, const
             }
 
             // token length and the next byte is the pointer offset in this case
-            uint16_t pointer_offset = (token_length << 8) | (enc_data[1]);
+            uint16_t pointer_offset = (token_value << 8) | (enc_data[1]);
             enc_data = (uint8_t*)h + pointer_offset;
             pointers_chased += 1;
+            continue;
+        }
+
+        if (is_extended) {
+            fprintf(stderr, "Warning: Extended label types are not supported, skipping label with value %d\n", token_value);
+            enc_data += 1 + token_value; // Skip the extended label
             continue;
         }
 
         enc_data += 1;
 
         // NULL terminator
-        if (token_length == 0) {
+        if (token_value == 0) {
             break;
         }
 
@@ -139,8 +147,8 @@ inline std::string DNSQuery_GetDomainName(const DNSQuery_MessageHeader* h, const
             result.append(".");
         }
 
-        result.append((const char*)enc_data, token_length);
-        enc_data += token_length;
+        result.append((const char*)enc_data, token_value);
+        enc_data += token_value;
     }
 
     return result;

@@ -30,6 +30,9 @@ enum class EDNSQuery_RR_TYPE : uint16_t {
     TYPE_TXT = 16, // Text Strings
     TYPE_AAAA = 28, // Host address (IPV6)
 
+    // EDNS(0)
+    TYPE_OPT = 41, // Option RR (meta-RR for EDNS(0) options)
+
     // [DNSSEC] - RFC4033, RFC4034, RFC4035
     TYPE_DS = 43, // DNSKEY RR pointer stored in parental zone for child zone
     TYPE_RRSIG = 46, // Digital signature for DNSSEC verification
@@ -58,6 +61,14 @@ enum class EDNSQuery_RR_QTYPE : uint16_t {
     TYPE_MX = 15, // Mail Exchange
     TYPE_TXT = 16, // Text Strings
     TYPE_AAAA = 28, // Host address (IPV6)
+
+    // EDNS(0)
+    TYPE_OPT = 41, // Option RR (meta-RR for EDNS(0) options)
+
+    // [DNSSEC] - RFC4033, RFC4034, RFC4035
+    TYPE_DS = 43, // DNSKEY RR pointer stored in parental zone for child zone
+    TYPE_RRSIG = 46, // Digital signature for DNSSEC verification
+    TYPE_NSEC = 47, // Next security info
     TYPE_DNSKEY = 48, // Public key for DNS security
 
     QTYPE_IXFR = 251, // Incremental Zone Transfer
@@ -102,6 +113,22 @@ enum class EDNSQuery_ReturnCode {
     RETURN_NAME_ERROR = 3,
     RETURN_NOT_IMPLEMENTED = 4,
     RETURN_REFUSED = 5,
+};
+
+enum class EDNSQuery_OPT_OptionCode : uint16_t {
+    OPTION_CODE_LLQ = 1, // Apple's Long-Lived Queries Protocol
+    OPTION_CODE_UL = 2, // Dynamic DNS Update Lease
+    OPTION_CODE_NSID = 3, // Name Server Identifier
+    OPTION_CODE_DAU = 5, // DNSSEC Algorithm Understood
+    OPTION_CODE_DHU = 6, // DNSSEC DS Hash Understood
+    OPTION_CODE_N3U = 7, // DNSSEC NSEC3 Hash Understood
+    OPTION_CODE_CLIENT_SUBNET = 8, // Client Subnet in DNS Queries
+    OPTION_CODE_EDNS_EXPIRE = 9, // Experimental use
+    OPTION_CODE_COOKIE = 10, // DNS Cookies
+    OPTION_CODE_TCP_KEEPALIVE = 11, // TCP Keepalive
+    OPTION_CODE_PADDING = 12, // Request Padding
+    OPTION_CODE_CHAIN = 13, // DNS Chain Query
+    OPTION_CODE_EDE = 14, // EDNS Extended Error
 };
 
 // Opaque base for inherited instances that represent each RDATA
@@ -151,6 +178,24 @@ private:
     EDNSQuery_RR_TYPE m_type;
     uint32_t m_ttl;
     DNS_RData* m_rdata;
+};
+
+class DNS_Record_OPT final : public DNS_Record {
+public:
+    DNS_Record_OPT() = delete;
+
+    // z is defined in RFC6891 as set to 0 and ignored by resolvers, but we allow it to be passed in to the constructor for future developments
+    DNS_Record_OPT(uint16_t udp_payload_size, uint8_t ext_rcode, uint8_t edns_version, bool dnssec_ok, uint16_t z, DNS_RData* data);
+
+    EDNSQuery_RR_TYPE type() const noexcept { return DNS_Record::type(); }
+
+    uint16_t udp_payload_size() const noexcept { return static_cast<uint16_t>(DNS_Record::klass()); }
+    uint8_t ext_rcode() const noexcept { return (DNS_Record::ttl() & 0xFF000000) >> 24; }
+    uint8_t edns_version() const noexcept { return (DNS_Record::ttl() & 0x00FF0000) >> 16; }
+    bool dnssec_ok() const noexcept { return (DNS_Record::ttl() & 0x00008000) != 0; }
+    uint16_t z() const noexcept { return (DNS_Record::ttl() & 0x00007FFF); }
+
+    const DNS_RData* rdata() const noexcept { return DNS_Record::rdata(); }
 };
 
 class DNS_Message {
@@ -578,6 +623,29 @@ private:
     uint64_t m_lower;
 };
 
+class DNS_RData_OPT final : public DNS_RData {
+public:
+    struct Option {
+        EDNSQuery_OPT_OptionCode code;
+        std::vector<uint8_t> data;
+    };
+
+public:
+    DNS_RData_OPT() = delete;
+    DNS_RData_OPT(const std::vector<Option>& options)
+        : m_options(options)
+    {
+    }
+
+    const std::vector<Option>& options() const noexcept
+    {
+        return m_options;
+    }
+
+private:
+    std::vector<Option> m_options;
+};
+
 class DNS_RData_DNSKEY final : public DNS_RData {
 public:
     DNS_RData_DNSKEY() = delete;
@@ -752,5 +820,4 @@ private:
     uint8_t m_digest_type;
     std::vector<uint8_t> m_digest;
 };
-
 }

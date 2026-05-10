@@ -36,6 +36,9 @@ namespace netpp {
     virtual bool is_running() const = 0;
     virtual bool is_connected() const = 0;
 
+    virtual uint32_t recv_bufsize() const = 0;
+    virtual uint32_t send_bufsize() const = 0;
+
     // Start the client to listen on the specified port
     virtual bool start() = 0;
     virtual void stop() = 0;
@@ -83,6 +86,9 @@ namespace netpp {
 
     bool is_running() const override;
     bool is_connected() const override;
+
+    uint32_t recv_bufsize() const override { return m_recvbuflen; }
+    uint32_t send_bufsize() const override { return m_sendbuflen; }
 
     bool start() override;
     void stop() override;
@@ -175,6 +181,9 @@ namespace netpp {
 
     bool is_running() const override;
     bool is_connected() const override;
+
+    uint32_t recv_bufsize() const override { return m_recvbuflen; }
+    uint32_t send_bufsize() const override { return m_sendbuflen; }
 
     bool start() override;
     void stop() override;

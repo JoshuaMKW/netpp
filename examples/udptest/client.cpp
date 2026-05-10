@@ -12,8 +12,8 @@
 #include <string>
 
 #include "client.h"
-#include "socket.h"
 #include "protocol.h"
+#include "socket.h"
 
 #include "dns/record.h"
 #include "dtls/security.h"
@@ -64,8 +64,16 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_TYPE type)
         return "MX";
     case netpp::EDNSQuery_RR_TYPE::TYPE_TXT:
         return "TXT";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_OPT:
+        return "OPT";
     case netpp::EDNSQuery_RR_TYPE::TYPE_DNSKEY:
         return "DNSKEY";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_RRSIG:
+        return "RRSIG";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_NSEC:
+        return "NSEC";
+    case netpp::EDNSQuery_RR_TYPE::TYPE_DS:
+        return "DS";
     default:
         return "UNKNOWN (" + std::to_string((uint16_t)type) + ")";
     }
@@ -108,8 +116,16 @@ static std::string RRTypeToString(netpp::EDNSQuery_RR_QTYPE type)
         return "MX";
     case netpp::EDNSQuery_RR_QTYPE::TYPE_TXT:
         return "TXT";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_OPT:
+        return "OPT";
     case netpp::EDNSQuery_RR_QTYPE::TYPE_DNSKEY:
         return "DNSKEY";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_RRSIG:
+        return "RRSIG";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_NSEC:
+        return "NSEC";
+    case netpp::EDNSQuery_RR_QTYPE::TYPE_DS:
+        return "DS";
     case netpp::EDNSQuery_RR_QTYPE::QTYPE_IXFR:
         return "Q_IXFR";
     case netpp::EDNSQuery_RR_QTYPE::QTYPE_AXFR:
@@ -173,10 +189,20 @@ static void printDNSQuestion(const netpp::DNS_Question& question)
 static void printDNSRecord(const netpp::DNS_Record& record)
 {
     std::cout << "--------------------------------------------------\n";
-    std::cout << std::left << std::setw(12) << "Record:" << record.name() << "\n";
-    std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(record.type()) << "\n";
-    std::cout << std::left << std::setw(12) << "Class:" << RRClassToString(record.klass()) << "\n";
-    std::cout << std::left << std::setw(12) << "TTL:" << record.ttl() << " seconds\n";
+    if (record.type() == netpp::EDNSQuery_RR_TYPE::TYPE_OPT) {
+        const netpp::DNS_Record_OPT* opt_record = static_cast<const netpp::DNS_Record_OPT*>(&record);
+        std::cout << std::left << std::setw(12) << "(OPT Record)" << "\n";
+        std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(opt_record->type()) << "\n";
+        std::cout << std::left << std::setw(12) << "UDP Payload Size:" << opt_record->udp_payload_size() << " bytes\n";
+        std::cout << std::left << std::setw(12) << "EDNS Version:" << opt_record->edns_version() << "\n";
+        std::cout << std::left << std::setw(12) << "DNSSEC OK:" << (opt_record->dnssec_ok() ? "Yes" : "No") << "\n";
+        std::cout << std::left << std::setw(12) << "Z:" << opt_record->z() << "\n";
+    } else {
+        std::cout << std::left << std::setw(12) << "Record:" << record.name() << "\n";
+        std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(record.type()) << "\n";
+        std::cout << std::left << std::setw(12) << "Class:" << RRClassToString(record.klass()) << "\n";
+        std::cout << std::left << std::setw(12) << "TTL:" << record.ttl() << " seconds\n";
+    }
     std::cout << "RData:\n";
 
     if (!record.rdata()) {
@@ -285,6 +311,14 @@ static void printDNSRecord(const netpp::DNS_Record& record)
         std::cout << std::dec << std::setfill(' ') << "]\n"; // Reset stream state
         break;
     }
+    case EDNSQuery_RR_TYPE::TYPE_OPT: {
+        auto* rdata = static_cast<const DNS_RData_OPT*>(record.rdata());
+        for (const auto& option : rdata->options()) {
+            std::cout << "  Option Code: " << (uint16_t)option.code << "\n";
+            std::cout << "  Option Data Length: " << option.data.size() << " bytes\n";
+        }
+        break;
+    }
     case EDNSQuery_RR_TYPE::TYPE_DNSKEY: {
         auto* rdata = static_cast<const DNS_RData_DNSKEY*>(record.rdata());
         std::cout << "  Flags:    " << rdata->flags() << "\n";
@@ -293,6 +327,48 @@ static void printDNSRecord(const netpp::DNS_Record& record)
 
         std::cout << "  Bitmap:     [ ";
         for (uint8_t byte : rdata->pubkey()) {
+            // Print as zero-padded hex
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
+        }
+        std::cout << std::dec << std::setfill(' ') << "]\n"; // Reset stream state
+        break;
+    }
+    case EDNSQuery_RR_TYPE::TYPE_DS: {
+        auto* rdata = static_cast<const DNS_RData_DS*>(record.rdata());
+        std::cout << "  Key Tag:      " << rdata->key_tag() << "\n";
+        std::cout << "  Algorithm:    " << (int)rdata->algorithm() << "\n";
+        std::cout << "  Digest Type:  " << (int)rdata->digest_type() << "\n";
+        std::cout << "  Digest:       [ ";
+        for (uint8_t byte : rdata->digest()) {
+            // Print as zero-padded hex
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
+        }
+        std::cout << std::dec << std::setfill(' ') << "]\n"; // Reset stream state
+        break;
+    }
+    case EDNSQuery_RR_TYPE::TYPE_RRSIG: {
+        auto* rdata = static_cast<const DNS_RData_RRSIG*>(record.rdata());
+        std::cout << "  Type Covered: " << RRTypeToString(rdata->type_covered()) << "\n";
+        std::cout << "  Algorithm:    " << (int)rdata->algorithm() << "\n";
+        std::cout << "  Labels:       " << (int)rdata->labels() << "\n";
+        std::cout << "  Original TTL: " << rdata->original_ttl() << "\n";
+        std::cout << "  Signature Expiration: " << rdata->sig_expiration() << "\n";
+        std::cout << "  Signature Inception:  " << rdata->sig_inception() << "\n";
+        std::cout << "  Key Tag:      " << rdata->key_tag() << "\n";
+        std::cout << "  Signer's Name: " << rdata->signers_name() << "\n";
+        std::cout << "  Signature:     [ ";
+        for (uint8_t byte : rdata->signature()) {
+            // Print as zero-padded hex
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
+        }
+        std::cout << std::dec << std::setfill(' ') << "]\n"; // Reset stream state
+        break;
+    }
+    case EDNSQuery_RR_TYPE::TYPE_NSEC: {
+        auto* rdata = static_cast<const DNS_RData_NSEC*>(record.rdata());
+        std::cout << "  Next Domain Name: " << rdata->next_domain_name() << "\n";
+        std::cout << "  Type Bitmap:     [ ";
+        for (uint8_t byte : rdata->type_bitmap()) {
             // Print as zero-padded hex
             std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
         }
@@ -310,158 +386,166 @@ static void printDNSRecord(const netpp::DNS_Record& record)
     }
 }
 
-int main(int argc, char** argv) {
-  if (!sockets_initialize()) {
-    fprintf(stderr, "Failed to initialize sockets interface\n");
-    return 1;
-  }
+int main(int argc, char** argv)
+{
+    if (!sockets_initialize()) {
+        fprintf(stderr, "Failed to initialize sockets interface\n");
+        return 1;
+    }
 
 #if CLIENT_USE_DTLS
-  if (!std::filesystem::exists(CLIENT_KEY)) {
-    std::filesystem::create_directories(std::filesystem::path(CLIENT_KEY).parent_path());
-    if (!netpp::generate_client_key_rsa_4096(
-      CLIENT_KEY,
-      "",
-      "US",
-      "netpp webfetch")) {
-      fprintf(stderr, "Failed to generate self-signed certificate\n");
-      return 1;
+    if (!std::filesystem::exists(CLIENT_KEY)) {
+        std::filesystem::create_directories(std::filesystem::path(CLIENT_KEY).parent_path());
+        if (!netpp::generate_client_key_rsa_4096(
+                CLIENT_KEY,
+                "",
+                "US",
+                "netpp webfetch")) {
+            fprintf(stderr, "Failed to generate self-signed certificate\n");
+            return 1;
+        }
     }
-  }
 
-  DTLSSecurityFactory* security
-      = new DTLSSecurityFactory(false, CLIENT_KEY, "", "", CLIENT_HOST, "", EDTLSVerifyFlags::VERIFY_PEER);
+    DTLSSecurityFactory* security
+        = new DTLSSecurityFactory(false, CLIENT_KEY, "", "", CLIENT_HOST, "", EDTLSVerifyFlags::VERIFY_PEER);
 #else
-  DTLSSecurityFactory* security = nullptr;
+    DTLSSecurityFactory* security = nullptr;
 #endif
 
-  UDP_Client client(security);
-  if (!client.start()) {
-    fprintf(stderr, "Failed to start the client\n");
-    return 1;
-  }
+    UDP_Client client(security);
+    if (!client.start()) {
+        fprintf(stderr, "Failed to start the client\n");
+        return 1;
+    }
 
-  HostIPInfo ip_info = get_ip_address_info(CLIENT_HOST);
-  if (!client.connect(ip_info.m_ipv4, "53")) {
-    fprintf(stderr, "Failed to connect to the server\n");
-    return 1;
-  }
+    HostIPInfo ip_info = get_ip_address_info(CLIENT_HOST);
+    if (!client.connect(ip_info.m_ipv4, "53")) {
+        fprintf(stderr, "Failed to connect to the server\n");
+        return 1;
+    }
 
-  printf("Connected to server (%s:%s)!\n\n", client.hostname().c_str(), client.port().c_str());
+    printf("Connected to server (%s:%s)!\n\n", client.hostname().c_str(), client.port().c_str());
 
-  std::mutex send_mutex;
-  std::condition_variable send_cv;
+    std::mutex send_mutex;
+    std::condition_variable send_cv;
 
-  client.on_dns_response([&](const ISocketPipe* source, const DNS_Message* message) -> DNS_Message* {
-      std::cout << "DNS MESSAGE (" << message->id() << ")\n";
-      
-      std::cout << "==== QUESTIONS ====\n";
-      for (const DNS_Question& question : message->questions()) {
-          printDNSQuestion(question);
-      }
+    client.on_dns_response([&](const ISocketPipe* source, const DNS_Message* message) -> DNS_Message* {
+        std::cout << "DNS MESSAGE (" << message->id() << ")\n";
 
-      std::cout << "\n==== ANSWERS ====\n";
-      for (const DNS_Record& answer : message->answers()) {
-          printDNSRecord(answer);
-      }
+        std::cout << "==== QUESTIONS ====\n";
+        for (const DNS_Question& question : message->questions()) {
+            printDNSQuestion(question);
+        }
 
-      std::cout << "\n==== AUTHORITATIVES ====\n";
-      for (const DNS_Record& authoritative : message->authoritatives()) {
-          printDNSRecord(authoritative);
-      }
+        std::cout << "\n==== ANSWERS ====\n";
+        for (const DNS_Record& answer : message->answers()) {
+            printDNSRecord(answer);
+        }
 
-      std::cout << "\n==== ADDITIONALS ====\n";
-      for (const DNS_Record& additional : message->additionals()) {
-          printDNSRecord(additional);
-      }
+        std::cout << "\n==== AUTHORITATIVES ====\n";
+        for (const DNS_Record& authoritative : message->authoritatives()) {
+            printDNSRecord(authoritative);
+        }
 
-      std::cout << "\n";
+        std::cout << "\n==== ADDITIONALS ====\n";
+        for (const DNS_Record& additional : message->additionals()) {
+            printDNSRecord(additional);
+        }
 
-      send_cv.notify_all();
-      return nullptr;
-  });
+        std::cout << "\n";
 
-  // Get IPV4 addresses associated with google.com
-  {
-      DNS_Question question = DNS_Question("google.com", EDNSQuery_RR_QTYPE::TYPE_DNSKEY, EDNSQuery_RR_QCLASS::CLASS_IN);
-      DNS_Message* message = DNS_Message::create_query(1);
-      message->add_question(question);
-      message->set_flags(0x0100);
+        send_cv.notify_all();
+        return nullptr;
+    });
 
-      if (!client.send(message)) {
-          fprintf(stderr, "Failed to send message\n");
-          return 1;
-      }
-  }
+    // Get IPV4 addresses associated with google.com
+    {
+        DNS_Question question = DNS_Question("example.com", EDNSQuery_RR_QTYPE::TYPE_AAAA, EDNSQuery_RR_QCLASS::CLASS_IN);
+        DNS_Message* message = DNS_Message::create_query(1);
+        message->add_question(question);
 
-  // Get the canonical name associated with www.google.com
-  {
-      DNS_Question question = DNS_Question("www.google.com", EDNSQuery_RR_QTYPE::TYPE_CNAME, EDNSQuery_RR_QCLASS::CLASS_IN);
-      DNS_Message* message = DNS_Message::create_query(2);
-      message->add_question(question);
-      message->set_flags(0x0100);
+        DNS_RData_OPT* opt_data = new DNS_RData_OPT(std::vector<DNS_RData_OPT::Option>());
+        DNS_Record_OPT opt_record = DNS_Record_OPT(client.send_bufsize(), 0, 0, true, 0, opt_data);
+        message->add_additional(opt_record);
 
-      if (!client.send(message)) {
-          fprintf(stderr, "Failed to send message\n");
-          return 1;
-      }
+        message->set_flags(0x0100);
 
-      std::unique_lock lock(send_mutex);
-      send_cv.wait(lock);
-  }
+        if (!client.send(message)) {
+            fprintf(stderr, "Failed to send message\n");
+            return 1;
+        }
 
-  // Get the Name Server records associated with microsoft.com
-  {
-      DNS_Question question = DNS_Question("microsoft.com", EDNSQuery_RR_QTYPE::TYPE_NS, EDNSQuery_RR_QCLASS::CLASS_IN);
-      DNS_Message* message = DNS_Message::create_query(3);
-      message->add_question(question);
-      message->set_flags(0x0100);
+        delete opt_data;
+    }
 
-      if (!client.send(message)) {
-          fprintf(stderr, "Failed to send message\n");
-          return 1;
-      }
+    // Get the canonical name associated with www.google.com
+    {
+        DNS_Question question = DNS_Question("www.google.com", EDNSQuery_RR_QTYPE::TYPE_CNAME, EDNSQuery_RR_QCLASS::CLASS_IN);
+        DNS_Message* message = DNS_Message::create_query(2);
+        message->add_question(question);
+        message->set_flags(0x0100);
 
-      std::unique_lock lock(send_mutex);
-      send_cv.wait(lock);
-  }
+        if (!client.send(message)) {
+            fprintf(stderr, "Failed to send message\n");
+            return 1;
+        }
 
-  // Get the long TXT data associated with _dmarc.google.com
-  {
-      DNS_Question question = DNS_Question("_dmarc.google.com", EDNSQuery_RR_QTYPE::TYPE_TXT, EDNSQuery_RR_QCLASS::CLASS_IN);
-      DNS_Message* message = DNS_Message::create_query(4);
-      message->add_question(question);
-      message->set_flags(0x0100);
+        std::unique_lock lock(send_mutex);
+        send_cv.wait(lock);
+    }
 
-      if (!client.send(message)) {
-          fprintf(stderr, "Failed to send message\n");
-          return 1;
-      }
+    // Get the Name Server records associated with microsoft.com
+    {
+        DNS_Question question = DNS_Question("microsoft.com", EDNSQuery_RR_QTYPE::TYPE_NS, EDNSQuery_RR_QCLASS::CLASS_IN);
+        DNS_Message* message = DNS_Message::create_query(3);
+        message->add_question(question);
+        message->set_flags(0x0100);
 
-      std::unique_lock lock(send_mutex);
-      send_cv.wait(lock);
-  }
+        if (!client.send(message)) {
+            fprintf(stderr, "Failed to send message\n");
+            return 1;
+        }
 
-  // Get the reverse DNS lookup for the ipv4 address
-  {
-      std::string bruhbruhbruh = get_reverse_lookup_domain_name(ip_info.m_ipv4);
+        std::unique_lock lock(send_mutex);
+        send_cv.wait(lock);
+    }
 
-      DNS_Question question = DNS_Question(bruhbruhbruh.c_str(), EDNSQuery_RR_QTYPE::TYPE_PTR, EDNSQuery_RR_QCLASS::CLASS_IN);
-      DNS_Message* message = DNS_Message::create_query(5);
-      message->add_question(question);
-      message->set_flags(0x0100);
+    // Get the long TXT data associated with _dmarc.google.com
+    {
+        DNS_Question question = DNS_Question("_dmarc.google.com", EDNSQuery_RR_QTYPE::TYPE_TXT, EDNSQuery_RR_QCLASS::CLASS_IN);
+        DNS_Message* message = DNS_Message::create_query(4);
+        message->add_question(question);
+        message->set_flags(0x0100);
 
-      if (!client.send(message)) {
-          fprintf(stderr, "Failed to send message\n");
-          return 1;
-      }
+        if (!client.send(message)) {
+            fprintf(stderr, "Failed to send message\n");
+            return 1;
+        }
 
-      std::unique_lock lock(send_mutex);
-      send_cv.wait(lock);
-  }
+        std::unique_lock lock(send_mutex);
+        send_cv.wait(lock);
+    }
 
-  client.stop();
+    // Get the reverse DNS lookup for the ipv4 address
+    {
+        std::string bruhbruhbruh = get_reverse_lookup_domain_name(ip_info.m_ipv4);
 
-  sockets_deinitialize();
-  return 0;
+        DNS_Question question = DNS_Question(bruhbruhbruh.c_str(), EDNSQuery_RR_QTYPE::TYPE_PTR, EDNSQuery_RR_QCLASS::CLASS_IN);
+        DNS_Message* message = DNS_Message::create_query(5);
+        message->add_question(question);
+        message->set_flags(0x0100);
+
+        if (!client.send(message)) {
+            fprintf(stderr, "Failed to send message\n");
+            return 1;
+        }
+
+        std::unique_lock lock(send_mutex);
+        send_cv.wait(lock);
+    }
+
+    client.stop();
+
+    sockets_deinitialize();
+    return 0;
 }
