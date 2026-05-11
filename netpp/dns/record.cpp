@@ -45,7 +45,11 @@ extern netpp::DNS_RData* RR_HINFO_Loader(const void* header, uint32_t rdlength, 
 extern netpp::DNS_RData* RR_MINFO_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 extern netpp::DNS_RData* RR_MX_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 extern netpp::DNS_RData* RR_TXT_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
+
 extern netpp::DNS_RData* RR_AAAA_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
+
+extern netpp::DNS_RData* RR_OPT_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
+
 extern netpp::DNS_RData* RR_DNSKEY_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 extern netpp::DNS_RData* RR_RRSIG_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
 extern netpp::DNS_RData* RR_DS_Loader(const void* header, uint32_t rdlength, const void* rdata, netpp::EDNSQuery_RR_CLASS);
@@ -68,7 +72,11 @@ extern uint16_t RR_HINFO_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, net
 extern uint16_t RR_MINFO_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 extern uint16_t RR_MX_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 extern uint16_t RR_TXT_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+
 extern uint16_t RR_AAAA_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+
+extern uint16_t RR_OPT_Storer(netpp::DNS_StorerState&, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
+
 extern uint16_t RR_DNSKEY_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 extern uint16_t RR_RRSIG_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
 extern uint16_t RR_DS_Storer(netpp::DNS_StorerState &, netpp::DNS_RData*, netpp::EDNSQuery_RR_CLASS);
@@ -94,6 +102,7 @@ static const auto s_rr_loaders = []() -> std::vector<netpp::DNS_RR_Loader> {
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_MX] = RR_MX_Loader;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_TXT] = RR_TXT_Loader;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_AAAA] = RR_AAAA_Loader;
+    out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_OPT] = RR_OPT_Loader;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_DS] = RR_DS_Loader;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_RRSIG] = RR_RRSIG_Loader;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_NSEC] = RR_NSEC_Loader;
@@ -122,6 +131,7 @@ static const auto s_rr_storers = []() -> std::vector<netpp::DNS_RR_Storer> {
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_MX] = RR_MX_Storer;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_TXT] = RR_TXT_Storer;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_AAAA] = RR_AAAA_Storer;
+    out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_OPT] = RR_OPT_Storer;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_DS] = RR_DS_Storer;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_RRSIG] = RR_RRSIG_Storer;
     out[(size_t)netpp::EDNSQuery_RR_TYPE::TYPE_NSEC] = RR_NSEC_Storer;

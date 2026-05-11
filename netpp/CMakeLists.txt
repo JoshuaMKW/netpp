@@ -59,7 +59,7 @@ add_library(netpp STATIC
     dns/record.cpp
     dns/rr_impl/common.h
     dns/rr_impl/rfc1035.cpp
- "dns/rr_impl/rfc4034.cpp" "dns/rr_impl/rfc3596.cpp" "dns/rr_impl/rfc6891.cpp")
+ "dns/rr_impl/rfc4034.cpp" "dns/rr_impl/rfc3596.cpp" "dns/rr_impl/rfc6891.cpp" "dns/crypto.cpp" "dns/crypto.h")
 
 # Include directories
 target_include_directories(netpp PUBLIC 

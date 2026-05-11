@@ -191,12 +191,12 @@ static void printDNSRecord(const netpp::DNS_Record& record)
     std::cout << "--------------------------------------------------\n";
     if (record.type() == netpp::EDNSQuery_RR_TYPE::TYPE_OPT) {
         const netpp::DNS_Record_OPT* opt_record = static_cast<const netpp::DNS_Record_OPT*>(&record);
-        std::cout << std::left << std::setw(12) << "(OPT Record)" << "\n";
-        std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(opt_record->type()) << "\n";
-        std::cout << std::left << std::setw(12) << "UDP Payload Size:" << opt_record->udp_payload_size() << " bytes\n";
-        std::cout << std::left << std::setw(12) << "EDNS Version:" << opt_record->edns_version() << "\n";
-        std::cout << std::left << std::setw(12) << "DNSSEC OK:" << (opt_record->dnssec_ok() ? "Yes" : "No") << "\n";
-        std::cout << std::left << std::setw(12) << "Z:" << opt_record->z() << "\n";
+        std::cout << std::left << std::setw(20) << "(OPT Record)" << "\n";
+        std::cout << std::left << std::setw(20) << "Type:" << RRTypeToString(opt_record->type()) << "\n";
+        std::cout << std::left << std::setw(20) << "UDP Payload Size:" << opt_record->udp_payload_size() << " bytes\n";
+        std::cout << std::left << std::setw(20) << "EDNS Version:" << static_cast<uint32_t>(opt_record->edns_version()) << "\n";
+        std::cout << std::left << std::setw(20) << "DNSSEC OK:" << (opt_record->dnssec_ok() ? "Yes" : "No") << "\n";
+        std::cout << std::left << std::setw(20) << "Z:" << opt_record->z() << "\n";
     } else {
         std::cout << std::left << std::setw(12) << "Record:" << record.name() << "\n";
         std::cout << std::left << std::setw(12) << "Type:" << RRTypeToString(record.type()) << "\n";
@@ -465,7 +465,7 @@ int main(int argc, char** argv)
         message->add_question(question);
 
         DNS_RData_OPT* opt_data = new DNS_RData_OPT(std::vector<DNS_RData_OPT::Option>());
-        DNS_Record_OPT opt_record = DNS_Record_OPT(client.send_bufsize(), 0, 0, true, 0, opt_data);
+        DNS_Record_OPT opt_record = DNS_Record_OPT(1232, 0, 0, true, 0, opt_data);
         message->add_additional(opt_record);
 
         message->set_flags(0x0100);
